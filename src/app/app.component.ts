@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { CategoryTabsComponent } from './components/category-tabs/category-tabs.component';
 
 @Component({
   selector: 'app-root',
@@ -7,10 +8,15 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
     RouterOutlet, // <router-outlet> を使うために必要
     RouterLink, // [routerLink] を使うために必要
     RouterLinkActive, // [routerLinkActive] を使うために必要
+    CategoryTabsComponent,
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
 })
 export class AppComponent {
+  // --- ここを追加 ---
+  // 初期値を 'すべて' に設定しておきます
+  selectedCategory: string = 'すべて';
+  // ----------------
   title = 'fashion-trends-tracker';
 }

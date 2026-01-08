@@ -1,0 +1,13 @@
+<div class="flex space-x-2 overflow-x-auto pb-4 scrollbar-hide">
+  <button
+    *ngFor="let category of categories"
+    (click)="onCategoryClick(category)"
+    class="px-4 py-2 rounded-full border text-sm whitespace-nowrap transition-all"
+    [class.bg-daidai]="activeCategory === category"
+    [class.text-white]="activeCategory === category"
+    [class.border-daidai]="activeCategory === category"
+    [class.bg-white]="activeCategory !== category"
+  >
+    {{ category }}
+  </button>
+</div>

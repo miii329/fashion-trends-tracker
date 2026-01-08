@@ -27,6 +27,19 @@
     </a>
   </div>
   <section class="content">
+    <app-category-tabs
+      [categories]="[
+        'すべて',
+        'ファッション',
+        'メイク',
+        'アクセサリー',
+        'カラコン',
+        'その他'
+      ]"
+      [activeCategory]="selectedCategory"
+      (categoryChanged)="selectedCategory = $event"
+    >
+    </app-category-tabs>
     <router-outlet />
   </section>
 </main>
