@@ -1,10 +1,11 @@
 import { Component } from '@angular/core';
 import { AddButtonComponent } from '@/components/add-button/add-button.component';
 import { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-base.component';
+import { CardBaseComponent } from '@/components/card-base/card-base.component';
 
 @Component({
   selector: 'app-brands',
-  imports: [AddButtonComponent, EditModalBaseComponent],
+  imports: [AddButtonComponent, EditModalBaseComponent, CardBaseComponent],
   templateUrl: './brands.component.html',
   styleUrl: './brands.component.css',
 })

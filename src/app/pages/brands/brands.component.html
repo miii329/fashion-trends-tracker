@@ -1,4 +1,20 @@
 <p>brands works!</p>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  @for (brand of brands; track brand.name) {
+  <app-card-base [title]="brand.name">
+    <button card-actions class="text-gray-400 hover:text-daidai p-1">
+      <span class="material-icons text-sm">edit</span>
+    </button>
+
+    <p class="text-sm">お気に入りの最新トレンドをチェックしましょう。</p>
+    <div class="mt-3 flex gap-2">
+      <span class="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded"
+        >#Fashion</span
+      >
+    </div>
+  </app-card-base>
+  }
+</div>
 <app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
 </app-add-button>
 <app-edit-modal-base
