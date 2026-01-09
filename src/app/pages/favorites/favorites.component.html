@@ -1,0 +1,19 @@
+<p>favorites works!</p>
+<app-add-button label="お気に入りを追加" (btnClick)="openAddModal()">
+</app-add-button>
+<app-edit-modal-base
+  [isOpen]="isModalOpen"
+  title="お気に入りを追加"
+  submitLabel="追加する"
+  inputLabel="お気に入り"
+  (close)="handleClose()"
+  (submit)="saveBrand()"
+>
+  <div>
+    <input
+      type="text"
+      class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-daidai outline-none"
+      placeholder="例: Nike, Apple"
+    />
+  </div>
+</app-edit-modal-base>
