@@ -2,10 +2,16 @@ import { Component } from '@angular/core';
 import { AddButtonComponent } from '@/components/add-button/add-button.component';
 import { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-base.component';
 import { CardBaseComponent } from '@/components/card-base/card-base.component';
+import { FormsModule } from '@angular/forms';
 
 @Component({
   selector: 'app-brands',
-  imports: [AddButtonComponent, EditModalBaseComponent, CardBaseComponent],
+  imports: [
+    FormsModule,
+    AddButtonComponent,
+    EditModalBaseComponent,
+    CardBaseComponent,
+  ],
   templateUrl: './brands.component.html',
   styleUrl: './brands.component.css',
 })
@@ -13,14 +19,43 @@ export class BrandsComponent {
   // 1. 最初は閉じているので false
   isModalOpen = false;
 
-  // 1. ブランド一覧のデータ
-  brands = [{ name: 'Nike' }, { name: 'Adidas' }];
-
-  // 2. 入力フォーム用の変数
-  newBrandName = '';
+  // ブランド一覧の初期データ
+  brands: any[] = [
+    {
+      name: 'Nike',
+      category: 'スポーツ',
+      description: 'スニーカーが有名',
+      url: 'https://www.nike.com',
+    },
+  ];
+  // 1. カテゴリーのリストを定義
+  readonly CATEGORIES = [
+    'すべて',
+    'ファッション',
+    'メイク',
+    'アクセサリー',
+    'カラコン',
+    'その他',
+  ];
+  // モーダル用（'すべて'は選択肢にいらないので除外したリスト）
+  get modalCategoryOptions() {
+    return this.CATEGORIES.filter((c) => c !== 'すべて');
+  }
+  // モーダル入力用のオブジェクト
+  newBrand = {
+    name: '',
+    category: '',
+    description: '',
+    url: '',
+  };
 
   openAddModal() {
-    this.newBrandName = ''; // 開くときに入力欄をクリア
+    this.newBrand = {
+      name: '',
+      category: '',
+      description: '',
+      url: '',
+    };
     this.isModalOpen = true;
   }
 
@@ -30,15 +65,14 @@ export class BrandsComponent {
 
   // 3. 保存処理
   saveBrand() {
-    if (this.newBrandName.trim()) {
-      // 配列の先頭に追加
-      this.brands.unshift({ name: this.newBrandName });
+    if (this.newBrand.name.trim()) {
+      // 1. 配列に現在の入力内容をコピーして追加
+      this.brands.unshift({ ...this.newBrand });
 
-      // モーダルを閉じる
-      this.handleClose();
+      // 2. 入力欄をすべてリセット
+      this.newBrand = { name: '', category: '', description: '', url: '' };
 
-      // 入力欄をリセット
-      this.newBrandName = '';
+      this.isModalOpen = false;
     }
   }
 }

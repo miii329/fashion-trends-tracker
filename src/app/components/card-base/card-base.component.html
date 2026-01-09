@@ -1,14 +1,7 @@
 <div
-  class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300 group"
+  class="border rounded-lg p-4 shadow-sm bg-white h-full transition-hover hover:shadow-md"
 >
-  <div class="flex justify-between items-center mb-3">
-    <h3 class="text-lg font-bold text-gray-800 tracking-tight">
-      {{ title }}
-    </h3>
-    <ng-content select="[card-actions]"></ng-content>
-  </div>
+  <h2 class="text-xl font-bold mb-3 border-b pb-2">{{ title }}</h2>
 
-  <div class="text-gray-600 leading-relaxed">
-    <ng-content></ng-content>
-  </div>
+  <ng-content></ng-content>
 </div>
