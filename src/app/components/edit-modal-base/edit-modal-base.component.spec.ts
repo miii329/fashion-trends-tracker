@@ -1,18 +1,16 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-
-import { EditBrandModalComponent } from './edit-brand-modal.component';
+import { EditModalBaseComponent } from './edit-modal-base.component';
 
 describe('EditBrandModalComponent', () => {
-  let component: EditBrandModalComponent;
-  let fixture: ComponentFixture<EditBrandModalComponent>;
+  let component: EditModalBaseComponent;
+  let fixture: ComponentFixture<EditModalBaseComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [EditBrandModalComponent]
-    })
-    .compileComponents();
+      imports: [EditModalBaseComponent],
+    }).compileComponents();
 
-    fixture = TestBed.createComponent(EditBrandModalComponent);
+    fixture = TestBed.createComponent(EditModalBaseComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
   });

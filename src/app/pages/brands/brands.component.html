@@ -1,5 +1,19 @@
 <p>brands works!</p>
 <app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
 </app-add-button>
-<app-edit-brand-modal [isOpen]="isModalOpen" (close)="handleClose()">
-</app-edit-brand-modal>
+<app-edit-modal-base
+  [isOpen]="isModalOpen"
+  title="ブランドを追加"
+  submitLabel="追加する"
+  inputLabel="ブランド名"
+  (close)="handleClose()"
+  (submit)="saveBrand()"
+>
+  <div>
+    <input
+      type="text"
+      class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-daidai outline-none"
+      placeholder="例: Nike, Apple"
+    />
+  </div>
+</app-edit-modal-base>

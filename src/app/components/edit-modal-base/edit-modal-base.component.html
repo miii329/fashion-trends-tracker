@@ -1,0 +1,37 @@
+@if (isOpen) {
+<div
+  (click)="onClose()"
+  class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 transition-opacity"
+>
+  <div
+    (click)="$event.stopPropagation()"
+    class="bg-white p-6 rounded-xl shadow-xl w-full max-w-md mx-4 transform transition-all"
+  >
+    <h2 class="text-xl font-bold mb-4 text-gray-800">{{ title }}</h2>
+
+    <div class="space-y-4">
+      <label class="block text-sm font-medium mb-1 text-gray-700">{{
+        inputLabel
+      }}</label>
+      <ng-content></ng-content>
+    </div>
+
+    <div class="flex justify-end space-x-3 mt-6">
+      <button
+        (click)="onClose()"
+        class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition font-medium"
+      >
+        キャンセル
+      </button>
+      <button
+        (click)="onSubmit()"
+        [disabled]="isSubmitDisabled"
+        [class.opacity-50]="isSubmitDisabled"
+        class="px-4 py-2 bg-daidai text-white rounded-lg font-bold hover:bg-opacity-90 transition shadow-sm"
+      >
+        {{ submitLabel }}
+      </button>
+    </div>
+  </div>
+</div>
+}
