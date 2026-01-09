@@ -1,19 +1,81 @@
 <p>brands works!</p>
+<!-- ブランド一覧をグリッド表示 -->
+@for (brand of brands; track brand.name) {
+<app-card-base [title]="brand.name">
+  <div class="space-y-2">
+    <span
+      class="text-xs font-semibold px-2 py-1 bg-gray-100 rounded text-gray-600"
+    >
+      {{ brand.category }}
+    </span>
+    <p class="text-sm text-gray-700 line-clamp-3">
+      {{ brand.description }}
+    </p>
+    @if (brand.url) {
+    <a
+      [href]="brand.url"
+      target="_blank"
+      class="text-blue-500 text-xs hover:underline block pt-2"
+    >
+      公式サイト →
+    </a>
+    }
+  </div>
+</app-card-base>
+}
+<!-- ブランド情報入力モーダル -->
 <app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
 </app-add-button>
 <app-edit-modal-base
   [isOpen]="isModalOpen"
-  title="ブランドを追加"
-  submitLabel="追加する"
-  inputLabel="ブランド名"
-  (close)="handleClose()"
+  title="ブランド追加"
   (submit)="saveBrand()"
+  (close)="isModalOpen = false"
 >
-  <div>
-    <input
-      type="text"
-      class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-daidai outline-none"
-      placeholder="例: Nike, Apple"
-    />
+  <div class="space-y-4 mt-4">
+    <div>
+      <label class="block text-sm font-medium text-gray-700">ブランド名</label>
+      <input
+        type="text"
+        [(ngModel)]="newBrand.name"
+        class="w-full border p-2 rounded-lg mt-1"
+        placeholder="例: Nike"
+      />
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700">カテゴリー</label>
+      <select
+        [(ngModel)]="newBrand.category"
+        name="brandCategory"
+        class="w-full border p-2 rounded-lg mt-1 bg-white"
+      >
+        @for (option of modalCategoryOptions; track option) {
+        <option [value]="option">{{ option }}</option>
+        }
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700">説明</label>
+      <textarea
+        [(ngModel)]="newBrand.description"
+        class="w-full border p-2 rounded-lg mt-1"
+        rows="3"
+        placeholder="ブランドの詳細を入力"
+      ></textarea>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700"
+        >ウェブサイトURL</label
+      >
+      <input
+        type="url"
+        [(ngModel)]="newBrand.url"
+        class="w-full border p-2 rounded-lg mt-1"
+        placeholder="https://example.com"
+      />
+    </div>
   </div>
 </app-edit-modal-base>
