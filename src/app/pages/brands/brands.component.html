@@ -1,1 +1,5 @@
 <p>brands works!</p>
+<app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
+</app-add-button>
+<app-edit-brand-modal [isOpen]="isModalOpen" (close)="handleClose()">
+</app-edit-brand-modal>

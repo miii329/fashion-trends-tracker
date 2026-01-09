@@ -18,10 +18,5 @@ export class AppComponent {
   // 初期値を 'すべて' に設定しておきます
   selectedCategory: string = 'すべて';
   // ----------------
-  openAddModal() {
-    console.log('ボタンがクリックされました！');
-    // ここにモーダルを開く処理を記述していきます
-    // 例: this.isModalOpen = true;
-  }
   title = 'fashion-trends-tracker';
 }

@@ -1,1 +1,5 @@
 <p>favorites works!</p>
+<app-add-button label="お気に入りを追加" (btnClick)="openAddModal()">
+</app-add-button>
+<app-edit-brand-modal [isOpen]="isModalOpen" (close)="handleClose()">
+</app-edit-brand-modal>
