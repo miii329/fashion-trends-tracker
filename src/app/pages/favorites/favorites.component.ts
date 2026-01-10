@@ -4,7 +4,7 @@ import { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-
 import { CardBaseComponent } from '@/components/card-base/card-base.component';
 import { FormsModule } from '@angular/forms';
 import { CommonModule, AsyncPipe } from '@angular/common';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import {
   addDoc,
   collection,
@@ -12,8 +12,17 @@ import {
   Firestore,
   orderBy,
   query,
+  serverTimestamp,
 } from '@angular/fire/firestore';
-import { map } from 'rxjs/operators';
+
+interface FavoriteItem {
+  brandName: string;
+  itemName: string;
+  url: string;
+  price: number | null;
+  memo: string;
+  category?: string;
+}
 
 @Component({
   selector: 'app-favorites',
@@ -29,10 +38,23 @@ import { map } from 'rxjs/operators';
   styleUrl: './favorites.component.css',
 })
 export class FavoritesComponent {
-  // 1. 最初は閉じているので false
+  private firestore: Firestore = inject(Firestore);
+
+  // お気に入り商品用のコレクション（favoritesに変更）
+  private favoritesCollection = collection(this.firestore, 'favorites');
+
+  // ブランド選択肢用
+  private brandsCollection = collection(this.firestore, 'brands');
+
   isModalOpen = false;
 
-  // 1. カテゴリーのリストを定義
+  // favorites$ に変更
+  favorites$: Observable<any[]>;
+  existingBrandNames$: Observable<string[]>;
+
+  // newItem に変更（newBrandではなく）
+  newItem = this.getEmptyItem() as FavoriteItem;
+
   readonly CATEGORIES = [
     'すべて',
     'ファッション',
@@ -41,77 +63,66 @@ export class FavoritesComponent {
     'カラコン',
     'その他',
   ];
-  // モーダル用（'すべて'は選択肢にいらないので除外したリスト）
+
   get modalCategoryOptions() {
     return this.CATEGORIES.filter((c) => c !== 'すべて');
   }
-  // モーダル入力用のオブジェクト
-  newBrand = {
-    name: '',
-    itemName: '',
-    url: '',
-    price: null as number | null,
-    memo: '',
-  };
-  openAddModal() {
-    this.newBrand = {
-      name: '',
+
+  constructor() {
+    // favorites コレクションから取得
+    const q = query(this.favoritesCollection, orderBy('createdAt', 'desc'));
+    this.favorites$ = collectionData(q, { idField: 'id' }) as Observable<any[]>;
+
+    // ブランド選択肢
+    this.existingBrandNames$ = collectionData(this.brandsCollection).pipe(
+      map((brands) => brands.map((b: any) => b.name).sort())
+    );
+  }
+
+  private getEmptyItem(): FavoriteItem {
+    return {
+      brandName: '',
       itemName: '',
       url: '',
-      price: null as number | null,
+      price: null,
       memo: '',
+      category: '',
     };
+  }
+
+  openAddModal() {
+    this.newItem = this.getEmptyItem();
     this.isModalOpen = true;
   }
 
   handleClose() {
     this.isModalOpen = false;
   }
-  // 1. 配列ではなく Observable に変更
-  private firestore: Firestore = inject(Firestore);
-  private brandsCollection = collection(this.firestore, 'brands');
-  // 商品リスト表示用
-  brands$: Observable<any[]>;
-  // セレクトボックスの選択肢用
-  existingBrandNames$: Observable<string[]>;
 
-  constructor() {
-    const q = query(this.brandsCollection, orderBy('createdAt', 'desc'));
-    this.brands$ = collectionData(q, { idField: 'id' }) as Observable<any[]>;
+  // saveItem に変更
+  async saveItem() {
+    if (!this.newItem.brandName.trim() || !this.newItem.itemName.trim()) {
+      alert('ブランド名と商品名は必須です');
+      return;
+    }
 
-    // DBから流れてくるデータから、ブランド名だけのユニークなリストを作る
-    this.existingBrandNames$ = this.brands$.pipe(
-      map((brands) => {
-        const names = brands.map((b) => b.name).filter((name) => !!name);
-        return [...new Set(names)].sort(); // 重複を削除してアルファベット順に
-      })
-    );
-  }
+    try {
+      // favorites コレクションに保存
+      await addDoc(this.favoritesCollection, {
+        brandName: this.newItem.brandName,
+        itemName: this.newItem.itemName,
+        url: this.newItem.url,
+        price: Number(this.newItem.price) || 0,
+        memo: this.newItem.memo,
+        category: this.newItem.category || '',
+        createdAt: serverTimestamp(),
+      });
 
-  // 4. 保存処理を Firebase 仕様に
-  async saveBrand() {
-    if (this.newBrand.name.trim()) {
-      try {
-        await addDoc(this.brandsCollection, {
-          name: this.newBrand.name,
-          itemName: this.newBrand.itemName,
-          url: this.newBrand.url,
-          price: this.newBrand.price,
-          memo: this.newBrand.memo,
-          createdAt: new Date(), // 並び替え用に作成日時を入れる
-        });
-
-        this.newBrand = {
-          name: '',
-          itemName: 'ファッション',
-          url: '',
-          price: null as number | null,
-          memo: '',
-        };
-        this.isModalOpen = false;
-      } catch (error) {
-        console.error('保存エラー:', error);
-      }
+      this.isModalOpen = false;
+      this.newItem = this.getEmptyItem();
+    } catch (error) {
+      console.error('Error saving favorite item:', error);
+      alert('保存に失敗しました');
     }
   }
 }

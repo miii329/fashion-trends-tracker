@@ -1,30 +1,37 @@
 <p>favorites works!</p>
 <!-- お気に入り商品一覧をグリッド表示 -->
-@for (brand of (brands$ | async); track brand.id) {
-<app-card-base [title]="brand.name">
-  <div class="space-y-2">
-    <span
-      class="text-xs font-semibold px-2 py-1 bg-gray-100 rounded text-gray-600"
-    >
-      {{ brand.category }}
-    </span>
-    <p class="text-sm text-gray-700 line-clamp-3">
-      {{ brand.description }}
-    </p>
-    @if (brand.url) {
-    <a
-      [href]="brand.url"
-      target="_blank"
-      class="text-blue-500 text-xs hover:underline block pt-2"
-    >
-      公式サイト →
-    </a>
-    }
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  @for (item of (favorites$ | async); track item.id) {
+  <app-card-base [title]="item.itemName">
+    <div class="space-y-2">
+      <span
+        class="text-xs font-semibold px-2 py-1 bg-pink-50 rounded text-pink-600"
+      >
+        {{ item.brandName }}
+      </span>
+      @if (item.price) {
+      <p class="text-sm font-bold text-gray-900">¥{{ item.price | number }}</p>
+      }
+      <p class="text-sm text-gray-600 line-clamp-3">
+        {{ item.memo }}
+      </p>
+      @if (item.url) {
+      <a
+        [href]="item.url"
+        target="_blank"
+        class="text-blue-500 text-xs hover:underline block pt-2"
+      >
+        商品リンク →
+      </a>
+      }
+    </div>
+  </app-card-base>
+  } @empty {
+  <div class="col-span-full text-center py-10 text-gray-400">
+    <p>お気に入りの商品はまだ登録されていません。</p>
   </div>
-</app-card-base>
-} @empty {
-<p>ブランドがまだ登録されていません。</p>
-}
+  }
+</div>
 <!-- 追加ボタン -->
 <app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
 </app-add-button>
@@ -32,14 +39,14 @@
 <app-edit-modal-base
   [isOpen]="isModalOpen"
   title="商品を追加 ✨"
-  (submit)="saveBrand()"
+  (submit)="saveItem()"
   (close)="isModalOpen = false"
 >
   <div class="space-y-4 mt-4">
     <div>
       <label class="block text-sm font-bold text-gray-500 ml-1">ブランド</label>
       <select
-        [(ngModel)]="newBrand.name"
+        [(ngModel)]="newItem['brandName']"
         class="w-full border-gray-200 border p-3 rounded-xl mt-1 bg-white focus:ring-2 focus:ring-pink-100 outline-none appearance-none cursor-pointer transition-all"
       >
         <option value="" disabled selected>
@@ -56,7 +63,7 @@
       <label class="block text-sm font-bold text-gray-500 ml-1">商品名</label>
       <input
         type="text"
-        [(ngModel)]="newBrand.itemName"
+        [(ngModel)]="newItem.itemName"
         class="w-full border-gray-200 border p-3 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none"
         placeholder="例: ワイヤレスヘッドホン"
       />
@@ -66,7 +73,7 @@
       <label class="block text-sm font-bold text-gray-500 ml-1">商品URL</label>
       <input
         type="url"
-        [(ngModel)]="newBrand.url"
+        [(ngModel)]="newItem.url"
         class="w-full border-gray-200 border p-3 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none"
         placeholder="https://..."
       />
@@ -78,7 +85,7 @@
         <span class="absolute left-4 text-gray-400">¥</span>
         <input
           type="number"
-          [(ngModel)]="newBrand.price"
+          [(ngModel)]="newItem.price"
           class="w-full border-gray-200 border p-3 pl-8 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none"
           placeholder="0"
         />
@@ -88,7 +95,7 @@
     <div>
       <label class="block text-sm font-bold text-gray-500 ml-1">メモ</label>
       <textarea
-        [(ngModel)]="newBrand.memo"
+        [(ngModel)]="newItem.memo"
         class="w-full border-gray-200 border p-3 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none"
         rows="3"
         placeholder="サイズ感や欲しい理由など..."
