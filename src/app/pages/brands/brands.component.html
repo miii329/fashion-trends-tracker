@@ -25,9 +25,10 @@
 } @empty {
 <p>ブランドがまだ登録されていません。</p>
 }
-<!-- ブランド情報入力モーダル -->
+<!-- 追加ボタン -->
 <app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
 </app-add-button>
+<!-- ブランド情報入力モーダル -->
 <app-edit-modal-base
   [isOpen]="isModalOpen"
   title="ブランド追加"
