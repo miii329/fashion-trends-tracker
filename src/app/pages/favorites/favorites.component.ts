@@ -4,7 +4,7 @@ import { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-
 import { CardBaseComponent } from '@/components/card-base/card-base.component';
 import { FormsModule } from '@angular/forms';
 import { CommonModule, AsyncPipe } from '@angular/common';
-import { Observable, map } from 'rxjs';
+import { BehaviorSubject, Observable, combineLatest, map } from 'rxjs';
 import {
   addDoc,
   collection,
@@ -14,6 +14,7 @@ import {
   query,
   serverTimestamp,
 } from '@angular/fire/firestore';
+import { CategoryTabsComponent } from '@/components/category-tabs/category-tabs.component';
 
 interface FavoriteItem {
   brandName: string;
@@ -33,27 +34,25 @@ interface FavoriteItem {
     FormsModule,
     CommonModule,
     AsyncPipe,
+    CategoryTabsComponent,
   ],
   templateUrl: './favorites.component.html',
   styleUrl: './favorites.component.css',
 })
 export class FavoritesComponent {
   private firestore: Firestore = inject(Firestore);
-
   // お気に入り商品用のコレクション（favoritesに変更）
   private favoritesCollection = collection(this.firestore, 'favorites');
-
   // ブランド選択肢用
   private brandsCollection = collection(this.firestore, 'brands');
+  // --- 状態管理 ---
+  // BehaviorSubject で選択中のカテゴリーを管理（これが「箱」）
+  private selectedCategorySubject = new BehaviorSubject<string>('すべて');
 
-  isModalOpen = false;
-
-  // favorites$ に変更
-  favorites$: Observable<any[]>;
-  existingBrandNames$: Observable<string[]>;
-
-  // newItem に変更（newBrandではなく）
-  newItem = this.getEmptyItem() as FavoriteItem;
+  // HTML側 [selectedCategory]="currentCategory" で使う窓口
+  get currentCategory(): string {
+    return this.selectedCategorySubject.value;
+  }
 
   readonly CATEGORIES = [
     'すべて',
@@ -64,19 +63,47 @@ export class FavoritesComponent {
     'その他',
   ];
 
-  get modalCategoryOptions() {
-    return this.CATEGORIES.filter((c) => c !== 'すべて');
-  }
+  isModalOpen = false;
+  newItem = this.getEmptyItem() as FavoriteItem;
+
+  // --- データストリーム ---
+  private favorites$: Observable<any[]>;
+  existingBrandNames$: Observable<string[]>;
+
+  // これをHTMLの @for で使います
+  filteredFavorites$: Observable<any[]>;
 
   constructor() {
-    // favorites コレクションから取得
+    // 1. 全データの購読
     const q = query(this.favoritesCollection, orderBy('createdAt', 'desc'));
     this.favorites$ = collectionData(q, { idField: 'id' }) as Observable<any[]>;
 
-    // ブランド選択肢
+    // 2. フィルタリングロジックの合体（Firestoreデータかタブが変わるたびに自動実行）
+    this.filteredFavorites$ = combineLatest([
+      this.favorites$,
+      this.selectedCategorySubject,
+    ]).pipe(
+      map(([items, category]) => {
+        if (category === 'すべて') return items;
+        return items.filter((item) => item.category === category);
+      })
+    );
+
+    // ブランド名の選択肢用
     this.existingBrandNames$ = collectionData(this.brandsCollection).pipe(
       map((brands) => brands.map((b: any) => b.name).sort())
     );
+  }
+
+  // 子コンポーネント(タブ)からの通知を受け取る関数
+  onCategoryChanged(category: string) {
+    this.selectedCategorySubject.next(category);
+  }
+
+  // --- 以下、メソッド類 ---
+
+  get modalCategoryOptions() {
+    return this.CATEGORIES.filter((c) => c !== 'すべて');
   }
 
   private getEmptyItem(): FavoriteItem {
@@ -86,7 +113,7 @@ export class FavoritesComponent {
       url: '',
       price: null,
       memo: '',
-      category: '',
+      category: 'ファッション', // 保存用初期値
     };
   }
 
@@ -99,7 +126,6 @@ export class FavoritesComponent {
     this.isModalOpen = false;
   }
 
-  // saveItem に変更
   async saveItem() {
     if (!this.newItem.brandName.trim() || !this.newItem.itemName.trim()) {
       alert('ブランド名と商品名は必須です');
@@ -107,14 +133,13 @@ export class FavoritesComponent {
     }
 
     try {
-      // favorites コレクションに保存
       await addDoc(this.favoritesCollection, {
         brandName: this.newItem.brandName,
         itemName: this.newItem.itemName,
         url: this.newItem.url,
         price: Number(this.newItem.price) || 0,
         memo: this.newItem.memo,
-        category: this.newItem.category || '',
+        category: this.newItem.category || 'その他',
         createdAt: serverTimestamp(),
       });
 

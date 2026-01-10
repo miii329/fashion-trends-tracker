@@ -1,6 +1,5 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { CategoryTabsComponent } from './components/category-tabs/category-tabs.component';
 import { AsyncPipe, CommonModule } from '@angular/common';
 // Firebase Auth 関連のインポート
 import {
@@ -19,7 +18,6 @@ import { Observable } from 'rxjs';
     RouterOutlet, // <router-outlet> を使うために必要
     RouterLink, // [routerLink] を使うために必要
     RouterLinkActive, // [routerLinkActive] を使うために必要
-    CategoryTabsComponent,
     AsyncPipe,
     CommonModule,
   ],
