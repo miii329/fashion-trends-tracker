@@ -72,6 +72,19 @@
     </div>
 
     <div>
+      <label class="block text-sm font-medium text-gray-700">カテゴリー</label>
+      <select
+        [(ngModel)]="newItem.category"
+        name="brandCategory"
+        class="w-full border p-2 rounded-lg mt-1 bg-white"
+      >
+        @for (option of modalCategoryOptions; track option) {
+        <option [value]="option">{{ option }}</option>
+        }
+      </select>
+    </div>
+
+    <div>
       <label class="block text-sm font-bold text-gray-500 ml-1">商品名</label>
       <input
         type="text"
