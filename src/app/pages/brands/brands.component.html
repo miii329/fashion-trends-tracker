@@ -1,6 +1,6 @@
 <p>brands works!</p>
 <!-- ブランド一覧をグリッド表示 -->
-@for (brand of brands; track brand.name) {
+@for (brand of (brands$ | async); track brand.id) {
 <app-card-base [title]="brand.name">
   <div class="space-y-2">
     <span
@@ -22,10 +22,13 @@
     }
   </div>
 </app-card-base>
+} @empty {
+<p>ブランドがまだ登録されていません。</p>
 }
-<!-- ブランド情報入力モーダル -->
+<!-- 追加ボタン -->
 <app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
 </app-add-button>
+<!-- ブランド情報入力モーダル -->
 <app-edit-modal-base
   [isOpen]="isModalOpen"
   title="ブランド追加"
