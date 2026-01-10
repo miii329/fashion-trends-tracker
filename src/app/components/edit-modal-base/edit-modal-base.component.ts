@@ -10,7 +10,6 @@ export class EditModalBaseComponent {
   @Input() isOpen = false;
   @Input() title = '編集';
   @Input() submitLabel = '保存';
-  @Input() inputLabel = 'ブランド名';
   @Input() isSubmitDisabled = false; // バリデーションエラー時にボタンを無効化できるように
   @Output() close = new EventEmitter<void>();
   @Output() submit = new EventEmitter<void>();
