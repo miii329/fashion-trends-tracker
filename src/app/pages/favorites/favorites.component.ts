@@ -1,4 +1,9 @@
-import { Component, inject } from '@angular/core';
+import {
+  Component,
+  EnvironmentInjector,
+  inject,
+  runInInjectionContext,
+} from '@angular/core';
 import { AddButtonComponent } from '@/components/add-button/add-button.component';
 import { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-base.component';
 import { CardBaseComponent } from '@/components/card-base/card-base.component';
@@ -53,19 +58,19 @@ export class FavoritesComponent {
   user$ = user(this.auth); // 現在のログインユーザーを監視
 
   private firestore: Firestore = inject(Firestore);
+  private injector = inject(EnvironmentInjector); // 警告解消のために必要
+
   // お気に入り商品用のコレクション（favoritesに変更）
   private favoritesCollection = collection(this.firestore, 'favorites');
   // ブランド選択肢用
   private brandsCollection = collection(this.firestore, 'brands');
-  // --- 状態管理 ---
-  // BehaviorSubject で選択中のカテゴリーを管理（これが「箱」）
-  private selectedCategorySubject = new BehaviorSubject<string>('すべて');
 
   // HTML側 [selectedCategory]="currentCategory" で使う窓口
   get currentCategory(): string {
     return this.selectedCategorySubject.value;
   }
-
+  //  最初は閉じているので false
+  isModalOpen = false;
   readonly CATEGORIES = [
     'すべて',
     'ファッション',
@@ -74,8 +79,9 @@ export class FavoritesComponent {
     'カラコン',
     'その他',
   ];
+  // BehaviorSubject で選択中のカテゴリーを管理（これが「箱」）
+  private selectedCategorySubject = new BehaviorSubject<string>('すべて');
 
-  isModalOpen = false;
   newItem = this.getEmptyItem() as FavoriteItem;
 
   // --- データストリーム ---
@@ -86,27 +92,28 @@ export class FavoritesComponent {
   filteredFavorites$: Observable<any[]>;
 
   constructor() {
+    // 1. ログインユーザーが切り替わったら、自動的にクエリを作り直す
     this.favorites$ = this.user$.pipe(
-      switchMap((user) => {
-        if (user) {
-          // ログイン中なら、その人のUIDで絞り込む
-          const q = query(
-            this.favoritesCollection,
-            where('uid', '==', user.uid),
-            orderBy('createdAt', 'desc')
-          );
-          return collectionData(q, { idField: 'id' });
+      switchMap((currentUser) => {
+        if (currentUser) {
+          // 非同期コールバック内でのFirebase API呼び出しをAngularのコンテキストで実行
+          return runInInjectionContext(this.injector, () => {
+            const q = query(
+              this.favoritesCollection,
+              where('uid', '==', currentUser.uid),
+              orderBy('createdAt', 'desc')
+            );
+            // idFieldを指定してドキュメントIDを取得可能にする
+            return collectionData(q, { idField: 'id' }) as Observable<any[]>;
+          });
         } else {
           // 未ログインなら空配列を返す
           return of([]);
         }
       })
     ) as Observable<any[]>;
-    // 1. 全データの購読
-    const q = query(this.favoritesCollection, orderBy('createdAt', 'desc'));
-    this.favorites$ = collectionData(q, { idField: 'id' }) as Observable<any[]>;
 
-    // 2. フィルタリングロジックの合体（Firestoreデータかタブが変わるたびに自動実行）
+    // フィルタリングロジックの合体（Firestoreデータかタブが変わるたびに自動実行）
     this.filteredFavorites$ = combineLatest([
       this.favorites$,
       this.selectedCategorySubject,
@@ -117,10 +124,49 @@ export class FavoritesComponent {
       })
     );
 
-    // ブランド名の選択肢用
-    this.existingBrandNames$ = collectionData(this.brandsCollection).pipe(
-      map((brands) => brands.map((b: any) => b.name).sort())
+    // ブランド名の選択肢用（ログインユーザーのブランドのみ）
+    this.existingBrandNames$ = this.user$.pipe(
+      switchMap((currentUser) => {
+        if (currentUser) {
+          return runInInjectionContext(this.injector, () => {
+            const q = query(
+              this.brandsCollection,
+              where('uid', '==', currentUser.uid),
+              orderBy('name')
+            );
+            return collectionData(q).pipe(
+              map((brands) => brands.map((b: any) => b.name))
+            );
+          });
+        } else {
+          return of([]);
+        }
+      })
     );
+
+    // === 最後にsubscribeでデバッグ ===
+    console.log('📝 About to subscribe to observables...');
+
+    this.user$.subscribe((user) => {
+      console.log('🔐 User subscription fired:', user?.uid);
+    });
+
+    this.favorites$.subscribe({
+      next: (items) => console.log('📦 favorites$ emitted:', items),
+      error: (err) => console.error('❌ favorites$ error:', err),
+    });
+
+    this.filteredFavorites$.subscribe({
+      next: (items) => console.log('✨ filteredFavorites$ emitted:', items),
+      error: (err) => console.error('❌ filteredFavorites$ error:', err),
+    });
+
+    this.existingBrandNames$.subscribe({
+      next: (brands) => console.log('🏷️ brandNames$ emitted:', brands),
+      error: (err) => console.error('❌ brandNames$ error:', err),
+    });
+
+    console.log('✅ All subscriptions set up');
   }
 
   // 子コンポーネント(タブ)からの通知を受け取る関数
@@ -173,7 +219,7 @@ export class FavoritesComponent {
         createdAt: serverTimestamp(),
         uid: currentUser.uid, // ユーザーIDを保存！
       });
-
+      console.log('✅ Item saved successfully!');
       this.isModalOpen = false;
       this.newItem = this.getEmptyItem();
     } catch (error) {

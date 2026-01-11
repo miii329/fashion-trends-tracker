@@ -44,13 +44,16 @@ import { Auth, user } from '@angular/fire/auth';
 })
 export class BrandsComponent {
   private auth: Auth = inject(Auth);
+  // ログインユーザーの状態を監視
+  user$ = user(this.auth);
+
   //  配列ではなく Observable に変更
   private firestore: Firestore = inject(Firestore);
   private injector = inject(EnvironmentInjector); // 警告解消のために必要
+
   // Firestoreコレクション参照
   private brandsCollection = collection(this.firestore, 'brands');
-  // ログインユーザーの状態を監視
-  user$ = user(this.auth);
+
   //  最初は閉じているので false
   isModalOpen = false;
   //  カテゴリーのリストを定義
