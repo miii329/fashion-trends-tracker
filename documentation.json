@@ -1,0 +1,1812 @@
+{
+    "pipes": [],
+    "interfaces": [
+        {
+            "name": "FavoriteItem",
+            "id": "interface-FavoriteItem-de5e338559c667dbe523a49f3f6583d4eef730d7e9e23afb6506167bc444a9339b881c69b37f5d77d3b4e98cb1600cd706b1034c1fac5f72d8987e27d7d90674",
+            "file": "src/app/pages/favorites/favorites.component.ts",
+            "deprecated": false,
+            "deprecationMessage": "",
+            "type": "interface",
+            "sourceCode": "import {\n  Component,\n  EnvironmentInjector,\n  inject,\n  runInInjectionContext,\n} from '@angular/core';\nimport { AddButtonComponent } from '@/components/add-button/add-button.component';\nimport { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-base.component';\nimport { CardBaseComponent } from '@/components/card-base/card-base.component';\nimport { FormsModule } from '@angular/forms';\nimport { CommonModule, AsyncPipe } from '@angular/common';\nimport {\n  BehaviorSubject,\n  Observable,\n  combineLatest,\n  map,\n  of,\n  switchMap,\n} from 'rxjs';\nimport {\n  addDoc,\n  collection,\n  collectionData,\n  Firestore,\n  orderBy,\n  query,\n  serverTimestamp,\n  where,\n} from '@angular/fire/firestore';\nimport { CategoryTabsComponent } from '@/components/category-tabs/category-tabs.component';\nimport { Auth, user } from '@angular/fire/auth';\n\ninterface FavoriteItem {\n  brandName: string;\n  itemName: string;\n  url: string;\n  price: number | null;\n  memo: string;\n  category?: string;\n}\n\n@Component({\n  selector: 'app-favorites',\n  imports: [\n    AddButtonComponent,\n    EditModalBaseComponent,\n    CardBaseComponent,\n    FormsModule,\n    CommonModule,\n    AsyncPipe,\n    CategoryTabsComponent,\n  ],\n  templateUrl: './favorites.component.html',\n  styleUrl: './favorites.component.css',\n})\nexport class FavoritesComponent {\n  private auth: Auth = inject(Auth);\n  user$ = user(this.auth); // 現在のログインユーザーを監視\n\n  private firestore: Firestore = inject(Firestore);\n  private injector = inject(EnvironmentInjector); // 警告解消のために必要\n\n  // お気に入り商品用のコレクション（favoritesに変更）\n  private favoritesCollection = collection(this.firestore, 'favorites');\n  // ブランド選択肢用\n  private brandsCollection = collection(this.firestore, 'brands');\n\n  // HTML側 [selectedCategory]=\"currentCategory\" で使う窓口\n  get currentCategory(): string {\n    return this.selectedCategorySubject.value;\n  }\n  //  最初は閉じているので false\n  isModalOpen = false;\n  readonly CATEGORIES = [\n    'すべて',\n    'ファッション',\n    'メイク',\n    'アクセサリー',\n    'カラコン',\n    'その他',\n  ];\n  // BehaviorSubject で選択中のカテゴリーを管理（これが「箱」）\n  private selectedCategorySubject = new BehaviorSubject<string>('すべて');\n\n  newItem = this.getEmptyItem() as FavoriteItem;\n\n  // --- データストリーム ---\n  private favorites$: Observable<any[]>;\n  existingBrandNames$: Observable<string[]>;\n\n  // これをHTMLの @for で使います\n  filteredFavorites$: Observable<any[]>;\n\n  constructor() {\n    // 1. ログインユーザーが切り替わったら、自動的にクエリを作り直す\n    this.favorites$ = this.user$.pipe(\n      switchMap((currentUser) => {\n        if (currentUser) {\n          // 非同期コールバック内でのFirebase API呼び出しをAngularのコンテキストで実行\n          return runInInjectionContext(this.injector, () => {\n            const q = query(\n              this.favoritesCollection,\n              where('uid', '==', currentUser.uid),\n              orderBy('createdAt', 'desc')\n            );\n            // idFieldを指定してドキュメントIDを取得可能にする\n            return collectionData(q, { idField: 'id' }) as Observable<any[]>;\n          });\n        } else {\n          // 未ログインなら空配列を返す\n          return of([]);\n        }\n      })\n    ) as Observable<any[]>;\n\n    // フィルタリングロジックの合体（Firestoreデータかタブが変わるたびに自動実行）\n    this.filteredFavorites$ = combineLatest([\n      this.favorites$,\n      this.selectedCategorySubject,\n    ]).pipe(\n      map(([items, category]) => {\n        if (category === 'すべて') return items;\n        return items.filter((item) => item.category === category);\n      })\n    );\n\n    // ブランド名の選択肢用（ログインユーザーのブランドのみ）\n    this.existingBrandNames$ = this.user$.pipe(\n      switchMap((currentUser) => {\n        if (currentUser) {\n          return runInInjectionContext(this.injector, () => {\n            const q = query(\n              this.brandsCollection,\n              where('uid', '==', currentUser.uid),\n              orderBy('name')\n            );\n            return collectionData(q).pipe(\n              map((brands) => brands.map((b: any) => b.name))\n            );\n          });\n        } else {\n          return of([]);\n        }\n      })\n    );\n\n    // === 最後にsubscribeでデバッグ ===\n    console.log('📝 About to subscribe to observables...');\n\n    this.user$.subscribe((user) => {\n      console.log('🔐 User subscription fired:', user?.uid);\n    });\n\n    this.favorites$.subscribe({\n      next: (items) => console.log('📦 favorites$ emitted:', items),\n      error: (err) => console.error('❌ favorites$ error:', err),\n    });\n\n    this.filteredFavorites$.subscribe({\n      next: (items) => console.log('✨ filteredFavorites$ emitted:', items),\n      error: (err) => console.error('❌ filteredFavorites$ error:', err),\n    });\n\n    this.existingBrandNames$.subscribe({\n      next: (brands) => console.log('🏷️ brandNames$ emitted:', brands),\n      error: (err) => console.error('❌ brandNames$ error:', err),\n    });\n\n    console.log('✅ All subscriptions set up');\n  }\n\n  // 子コンポーネント(タブ)からの通知を受け取る関数\n  onCategoryChanged(category: string) {\n    this.selectedCategorySubject.next(category);\n  }\n\n  // --- 以下、メソッド類 ---\n\n  get modalCategoryOptions() {\n    return this.CATEGORIES.filter((c) => c !== 'すべて');\n  }\n\n  private getEmptyItem(): FavoriteItem {\n    return {\n      brandName: '',\n      itemName: '',\n      url: '',\n      price: null,\n      memo: '',\n      category: 'ファッション', // 保存用初期値\n    };\n  }\n\n  openAddModal() {\n    this.newItem = this.getEmptyItem();\n    this.isModalOpen = true;\n  }\n\n  handleClose() {\n    this.isModalOpen = false;\n  }\n\n  async saveItem() {\n    const currentUser = await this.auth.currentUser; // 現在のユーザーを取得\n    if (!currentUser) return; // ログインしてなければ保存させない\n    if (!this.newItem.brandName.trim() || !this.newItem.itemName.trim()) {\n      alert('ブランド名と商品名は必須です');\n      return;\n    }\n\n    try {\n      await addDoc(this.favoritesCollection, {\n        brandName: this.newItem.brandName,\n        itemName: this.newItem.itemName,\n        url: this.newItem.url,\n        price: Number(this.newItem.price) || 0,\n        memo: this.newItem.memo,\n        category: this.newItem.category || 'その他',\n        createdAt: serverTimestamp(),\n        uid: currentUser.uid, // ユーザーIDを保存！\n      });\n      console.log('✅ Item saved successfully!');\n      this.isModalOpen = false;\n      this.newItem = this.getEmptyItem();\n    } catch (error) {\n      console.error('Error saving favorite item:', error);\n      alert('保存に失敗しました');\n    }\n  }\n}\n",
+            "properties": [
+                {
+                    "name": "brandName",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 34
+                },
+                {
+                    "name": "category",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": true,
+                    "description": "",
+                    "line": 39
+                },
+                {
+                    "name": "itemName",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 35
+                },
+                {
+                    "name": "memo",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 38
+                },
+                {
+                    "name": "price",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "number | null",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 37
+                },
+                {
+                    "name": "url",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 36
+                }
+            ],
+            "indexSignatures": [],
+            "kind": 172,
+            "methods": [],
+            "extends": []
+        },
+        {
+            "name": "User",
+            "id": "interface-User-d4821beac0e4a852e513391b7470981c4353fdd95a18628bb68136c8695b489ee15b926e2e5031bc26cf30e1508e0a362c3ee13a06734702b4d15af140e485d5",
+            "file": "src/stories/user.ts",
+            "deprecated": false,
+            "deprecationMessage": "",
+            "type": "interface",
+            "sourceCode": "export interface User {\n  name: string;\n}\n",
+            "properties": [
+                {
+                    "name": "name",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 2
+                }
+            ],
+            "indexSignatures": [],
+            "kind": 172,
+            "methods": [],
+            "extends": []
+        }
+    ],
+    "injectables": [],
+    "guards": [],
+    "interceptors": [],
+    "classes": [],
+    "directives": [],
+    "components": [
+        {
+            "name": "AddButtonComponent",
+            "id": "component-AddButtonComponent-01b2c07003efb2de63d681547a0eb7a98db5418cb32547466cdb47cebe5c0f66090774794d5e6365b84b71a0a22c8b86dc7f4dc03b66a98c8dbbccd1571e33a3",
+            "file": "src/app/components/add-button/add-button.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-add-button",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./add-button.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [
+                {
+                    "name": "label",
+                    "defaultValue": "'追加'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 10,
+                    "type": "string",
+                    "decorators": []
+                }
+            ],
+            "outputsClass": [
+                {
+                    "name": "btnClick",
+                    "defaultValue": "new EventEmitter<void>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 11,
+                    "type": "EventEmitter"
+                }
+            ],
+            "propertiesClass": [],
+            "methodsClass": [
+                {
+                    "name": "onClick",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 12,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                }
+            ],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component, Input, Output, EventEmitter } from '@angular/core';\n\n@Component({\n  selector: 'app-add-button',\n  imports: [],\n  templateUrl: './add-button.component.html',\n  styleUrl: './add-button.component.css',\n})\nexport class AddButtonComponent {\n  @Input() label: string = '追加'; // デフォルト値\n  @Output() btnClick = new EventEmitter<void>();\n  onClick() {\n    this.btnClick.emit();\n  }\n}\n",
+            "styleUrl": "./add-button.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "extends": [],
+            "templateData": "<button\n  (click)=\"onClick()\"\n  class=\"flex items-center bg-daidai text-white px-4 py-2 rounded-full font-bold hover:bg-opacity-90 transition shadow-md\"\n>\n  <span class=\"mr-2 text-xl\">+</span>\n  {{ label }}\n</button>\n"
+        },
+        {
+            "name": "AppComponent",
+            "id": "component-AppComponent-04a99cce5e7883d51f7daa6bb5ca95673bf0eb3a74b45892d32a55eeff11e697e36789d677c98cab29d541cf3274efeec6d8e08883bc57465d83766f8dcd5ec5",
+            "file": "src/app/app.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-root",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./app.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [],
+            "outputsClass": [],
+            "propertiesClass": [
+                {
+                    "name": "auth",
+                    "defaultValue": "inject(Auth)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Auth",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 28,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "selectedCategory",
+                    "defaultValue": "'すべて'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 32
+                },
+                {
+                    "name": "title",
+                    "defaultValue": "'fashion-trends-tracker'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "string",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 30
+                },
+                {
+                    "name": "user$",
+                    "defaultValue": "user(this.auth)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Observable<User | null>",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 34
+                }
+            ],
+            "methodsClass": [
+                {
+                    "name": "login",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "any",
+                    "typeParameters": [],
+                    "line": 36,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "modifierKind": [
+                        134
+                    ]
+                },
+                {
+                    "name": "logout",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "any",
+                    "typeParameters": [],
+                    "line": 45,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "modifierKind": [
+                        134
+                    ]
+                }
+            ],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [
+                {
+                    "name": "RouterOutlet"
+                },
+                {
+                    "name": "RouterLink"
+                },
+                {
+                    "name": "RouterLinkActive"
+                },
+                {
+                    "name": "AsyncPipe",
+                    "type": "pipe"
+                },
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component, inject } from '@angular/core';\nimport { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';\nimport { AsyncPipe, CommonModule } from '@angular/common';\n// Firebase Auth 関連のインポート\nimport {\n  Auth,\n  GoogleAuthProvider,\n  signInWithPopup,\n  signOut,\n  user,\n  User,\n} from '@angular/fire/auth';\nimport { Observable } from 'rxjs';\n\n@Component({\n  selector: 'app-root',\n  imports: [\n    RouterOutlet, // <router-outlet> を使うために必要\n    RouterLink, // [routerLink] を使うために必要\n    RouterLinkActive, // [routerLinkActive] を使うために必要\n    AsyncPipe,\n    CommonModule,\n  ],\n  templateUrl: './app.component.html',\n  styleUrl: './app.component.css',\n})\nexport class AppComponent {\n  private auth: Auth = inject(Auth);\n  // タイトル\n  title = 'fashion-trends-tracker';\n  // カテゴリー管理用（初期値は 'すべて'）\n  selectedCategory: string = 'すべて';\n  // ログインユーザーの状態を監視\n  user$: Observable<User | null> = user(this.auth);\n  // ログイン処理\n  async login() {\n    const provider = new GoogleAuthProvider();\n    try {\n      await signInWithPopup(this.auth, provider);\n    } catch (error) {\n      console.error('ログインエラー:', error);\n    }\n  }\n  // ログアウト処理\n  async logout() {\n    if (confirm('ログアウトしますか？')) {\n      await signOut(this.auth);\n    }\n  }\n}\n",
+            "styleUrl": "./app.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "extends": [],
+            "templateData": "<div class=\"py-8 px-6\">\n  <header>\n    <div class=\"flex items-center justify-between\">\n      <h1 class=\"text-[30px] font-bold text-daidai\">TrendClip</h1>\n      <div class=\"flex items-center gap-3\">\n        @if (user$ | async; as user) {\n        <div class=\"flex items-center gap-2\">\n          <img\n            [src]=\"user.photoURL\"\n            alt=\"icon\"\n            class=\"w-8 h-8 rounded-full border border-pink-200\"\n          />\n          <span class=\"text-sm font-medium text-gray-600 hidden md:block\">{{\n            user.displayName\n          }}</span>\n        </div>\n        <button\n          (click)=\"logout()\"\n          class=\"text-xs font-bold text-gray-400 hover:text-pink-500 transition-colors\"\n        >\n          ログアウト\n        </button>\n        } @else {\n        <button\n          (click)=\"login()\"\n          class=\"bg-pink-500 text-white px-4 py-2 rounded-full text-sm font-bold hover:bg-pink-600 transition-all shadow-md shadow-pink-100\"\n        >\n          Googleでログイン\n        </button>\n        }\n      </div>\n    </div>\n    <p class=\"mb-8\">お気に入りのブランドを管理して最新動向をチェック</p>\n  </header>\n  <main>\n    <div class=\"mb-6 flex gap-4 border-b border-gray-200\">\n      <a\n        routerLink=\"/brands\"\n        routerLinkActive=\"text-daidai\"\n        class=\"hover:text-daidai transition px-3 py-2 md:px-6 md:py-3\"\n      >\n        ブランド一覧\n      </a>\n      <a\n        routerLink=\"/new-items\"\n        routerLinkActive=\"text-daidai\"\n        class=\"hover:text-daidai transition px-3 py-2 md:px-6 md:py-3\"\n      >\n        新作商品\n      </a>\n      <a\n        routerLink=\"/favorites\"\n        routerLinkActive=\"text-daidai\"\n        class=\"hover:text-daidai transition px-3 py-2 md:px-6 md:py-3\"\n      >\n        お気に入り商品\n      </a>\n    </div>\n    <section class=\"content\">\n      <router-outlet />\n    </section>\n  </main>\n</div>\n"
+        },
+        {
+            "name": "BrandsComponent",
+            "id": "component-BrandsComponent-006f1c437142fc7b1da2a06c39c11a686651b751efdd8ec047b0dccc82daca53924dc22f67a99d5254376965670a5fc1b66526008d2785e04cddaa2fc00155e1",
+            "file": "src/app/pages/brands/brands.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-brands",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./brands.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [],
+            "outputsClass": [],
+            "propertiesClass": [
+                {
+                    "name": "auth",
+                    "defaultValue": "inject(Auth)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Auth",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 46,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "brandsCollection",
+                    "defaultValue": "collection(this.firestore, 'brands')",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 55,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "CATEGORIES",
+                    "defaultValue": "[\n    'すべて',\n    'ファッション',\n    'メイク',\n    'アクセサリー',\n    'カラコン',\n    'その他',\n  ]",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "[]",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 60,
+                    "modifierKind": [
+                        148
+                    ]
+                },
+                {
+                    "name": "filteredBrands$",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Observable<any[]>",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 82
+                },
+                {
+                    "name": "firestore",
+                    "defaultValue": "inject(Firestore)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Firestore",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 51,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "injector",
+                    "defaultValue": "inject(EnvironmentInjector)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 52,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "isModalOpen",
+                    "defaultValue": "false",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 58
+                },
+                {
+                    "name": "newBrand",
+                    "defaultValue": "{\n    name: '',\n    category: '',\n    description: '',\n    url: '',\n  }",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "object",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 71
+                },
+                {
+                    "name": "rawBrands$",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Observable<any[]>",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 79,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "selectedCategory$",
+                    "defaultValue": "new BehaviorSubject<string>('すべて')",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 69,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "user$",
+                    "defaultValue": "user(this.auth)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 48
+                }
+            ],
+            "methodsClass": [
+                {
+                    "name": "handleClose",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 136,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                },
+                {
+                    "name": "onCategoryChanged",
+                    "args": [
+                        {
+                            "name": "category",
+                            "type": "string",
+                            "deprecated": false,
+                            "deprecationMessage": ""
+                        }
+                    ],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 122,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "jsdoctags": [
+                        {
+                            "name": "category",
+                            "type": "string",
+                            "deprecated": false,
+                            "deprecationMessage": "",
+                            "tagName": {
+                                "text": "param"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "openAddModal",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 126,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                },
+                {
+                    "name": "saveBrand",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "any",
+                    "typeParameters": [],
+                    "line": 144,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "modifierKind": [
+                        134
+                    ]
+                }
+            ],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [
+                {
+                    "name": "FormsModule",
+                    "type": "module"
+                },
+                {
+                    "name": "AddButtonComponent",
+                    "type": "component"
+                },
+                {
+                    "name": "EditModalBaseComponent",
+                    "type": "component"
+                },
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                },
+                {
+                    "name": "AsyncPipe",
+                    "type": "pipe"
+                },
+                {
+                    "name": "CategoryTabsComponent",
+                    "type": "component"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import {\n  Component,\n  EnvironmentInjector,\n  inject,\n  runInInjectionContext,\n} from '@angular/core';\nimport { AddButtonComponent } from '@/components/add-button/add-button.component';\nimport { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-base.component';\nimport { FormsModule } from '@angular/forms';\nimport { CommonModule, AsyncPipe } from '@angular/common';\nimport {\n  BehaviorSubject,\n  combineLatest,\n  map,\n  Observable,\n  of,\n  switchMap,\n} from 'rxjs';\nimport {\n  addDoc,\n  collection,\n  collectionData,\n  Firestore,\n  orderBy,\n  query,\n  serverTimestamp,\n  where,\n} from '@angular/fire/firestore';\nimport { CategoryTabsComponent } from '@/components/category-tabs/category-tabs.component';\nimport { Auth, user } from '@angular/fire/auth';\n\n@Component({\n  selector: 'app-brands',\n  imports: [\n    FormsModule,\n    AddButtonComponent,\n    EditModalBaseComponent,\n    CommonModule,\n    AsyncPipe,\n    CategoryTabsComponent,\n  ],\n  templateUrl: './brands.component.html',\n  styleUrl: './brands.component.css',\n})\nexport class BrandsComponent {\n  private auth: Auth = inject(Auth);\n  // ログインユーザーの状態を監視\n  user$ = user(this.auth);\n\n  //  配列ではなく Observable に変更\n  private firestore: Firestore = inject(Firestore);\n  private injector = inject(EnvironmentInjector); // 警告解消のために必要\n\n  // Firestoreコレクション参照\n  private brandsCollection = collection(this.firestore, 'brands');\n\n  //  最初は閉じているので false\n  isModalOpen = false;\n  //  カテゴリーのリストを定義\n  readonly CATEGORIES = [\n    'すべて',\n    'ファッション',\n    'メイク',\n    'アクセサリー',\n    'カラコン',\n    'その他',\n  ];\n  // 選択中のカテゴリーを保持するSubject（初期値：すべて）\n  private selectedCategory$ = new BehaviorSubject<string>('すべて');\n  // モーダル入力用のオブジェクト\n  newBrand = {\n    name: '',\n    category: '',\n    description: '',\n    url: '',\n  };\n  // --- データ取得ロジック ---\n  // Firestoreからの生データ（最新順）\n  private rawBrands$: Observable<any[]>;\n  // 2. 表示用にフィルタリングされたデータ\n  // brands$ と selectedCategory$ の両方が変わるたびに自動で再計算される\n  filteredBrands$: Observable<any[]>;\n  constructor() {\n    // 1. ログインユーザーが切り替わったら、自動的にクエリを作り直す\n    this.rawBrands$ = this.user$.pipe(\n      switchMap((currentUser) => {\n        if (currentUser) {\n          // 非同期コールバック内でのFirebase API呼び出しをAngularのコンテキストで実行\n          return runInInjectionContext(this.injector, () => {\n            const q = query(\n              this.brandsCollection,\n              where('uid', '==', currentUser.uid),\n              orderBy('createdAt', 'desc')\n            );\n            // idFieldを指定してドキュメントIDを取得可能にする\n            return collectionData(q, { idField: 'id' }) as Observable<any[]>;\n          });\n        } else {\n          // 未ログインの場合：空のリストを返す\n          return of([]);\n        }\n      })\n    ) as Observable<any[]>;\n    // フィルタリングロジックの合体\n    this.filteredBrands$ = combineLatest([\n      this.rawBrands$,\n      this.selectedCategory$,\n    ]).pipe(\n      map(([brands, selectedCategory]) => {\n        if (selectedCategory === 'すべて') return brands;\n        return brands.filter((brand) => brand.category === selectedCategory);\n      })\n    );\n  }\n  // --- メソッド ---\n  // 現在の選択カテゴリーを取得（テンプレートでのバインド用）\n  get currentCategory(): string {\n    return this.selectedCategory$.value;\n  }\n\n  // 子コンポーネント(タブ)から呼ばれる関数\n  onCategoryChanged(category: string) {\n    this.selectedCategory$.next(category);\n  }\n\n  openAddModal() {\n    this.newBrand = {\n      name: '',\n      category: '',\n      description: '',\n      url: '',\n    };\n    this.isModalOpen = true;\n  }\n\n  handleClose() {\n    this.isModalOpen = false;\n  }\n  get modalCategoryOptions() {\n    return this.CATEGORIES.filter((c) => c !== 'すべて');\n  }\n\n  // 4. 保存処理を Firebase 仕様に\n  async saveBrand() {\n    // ① 現在のログインユーザー情報を取得\n    const currentUser = this.auth.currentUser;\n    if (!currentUser) {\n      alert('ログインが必要です');\n      return;\n    }\n    if (this.newBrand.name.trim()) {\n      try {\n        await addDoc(this.brandsCollection, {\n          name: this.newBrand.name,\n          category: this.newBrand.category,\n          description: this.newBrand.description,\n          url: this.newBrand.url,\n          uid: currentUser.uid, // ユーザーIDも保存\n          createdAt: serverTimestamp(), // Firebaseサーバー時刻を使用するのがベスト\n        });\n\n        this.isModalOpen = false;\n        // フォームをリセット\n        this.newBrand = {\n          name: '',\n          category: 'ファッション',\n          description: '',\n          url: '',\n        };\n      } catch (error) {\n        console.error('保存エラー:', error);\n      }\n    }\n  }\n}\n",
+            "styleUrl": "./brands.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "constructorObj": {
+                "name": "constructor",
+                "description": "",
+                "deprecated": false,
+                "deprecationMessage": "",
+                "args": [],
+                "line": 82
+            },
+            "extends": [],
+            "accessors": {
+                "currentCategory": {
+                    "name": "currentCategory",
+                    "getSignature": {
+                        "name": "currentCategory",
+                        "type": "string",
+                        "returnType": "string",
+                        "line": 117
+                    }
+                },
+                "modalCategoryOptions": {
+                    "name": "modalCategoryOptions",
+                    "getSignature": {
+                        "name": "modalCategoryOptions",
+                        "type": "",
+                        "returnType": "",
+                        "line": 139
+                    }
+                }
+            },
+            "templateData": "<app-category-tabs\n  [selectedCategory]=\"currentCategory\"\n  (categoryChange)=\"onCategoryChanged($event)\"\n>\n</app-category-tabs>\n<!-- 追加ボタン -->\n<app-add-button\n  class=\"flex justify-end mb-4\"\n  label=\"ブランドを追加\"\n  (btnClick)=\"openAddModal()\"\n>\n</app-add-button>\n<!-- ブランド一覧をグリッド表示 -->\n<div class=\"grid grid-cols-1 md:grid-cols-2 gap-4 mt-4\">\n  @for (brand of (filteredBrands$ | async); track brand.id) {\n  <div class=\"border p-4 rounded-xl shadow-sm bg-white\">\n    <div class=\"flex justify-between items-start mb-2\">\n      <h2 class=\"font-bold text-lg\">{{ brand.name }}</h2>\n      <span class=\"text-xs px-2 py-1 bg-gray-100 rounded\">{{\n        brand.category\n      }}</span>\n    </div>\n    <p class=\"text-sm text-gray-600 mb-4\">{{ brand.description }}</p>\n    @if (brand.url) {\n    <a\n      [href]=\"brand.url\"\n      target=\"_blank\"\n      class=\"text-blue-500 text-xs hover:underline\"\n    >\n      公式サイト →\n    </a>\n    }\n  </div>\n  } @empty {\n  <div class=\"col-span-2 py-20 text-center text-gray-400\">\n    該当するブランドがありません。\n  </div>\n  }\n</div>\n<!-- ブランド情報入力モーダル -->\n<app-edit-modal-base\n  [isOpen]=\"isModalOpen\"\n  title=\"ブランド追加\"\n  (submit)=\"saveBrand()\"\n  (close)=\"isModalOpen = false\"\n>\n  <div class=\"space-y-4 mt-4\">\n    <div>\n      <label class=\"block text-sm font-medium text-gray-700\">ブランド名</label>\n      <input\n        type=\"text\"\n        [(ngModel)]=\"newBrand.name\"\n        class=\"w-full border p-2 rounded-lg mt-1\"\n        placeholder=\"例: Nike\"\n      />\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-medium text-gray-700\">カテゴリー</label>\n      <select\n        [(ngModel)]=\"newBrand.category\"\n        name=\"brandCategory\"\n        class=\"w-full border p-2 rounded-lg mt-1 bg-white\"\n      >\n        @for (option of modalCategoryOptions; track option) {\n        <option [value]=\"option\">{{ option }}</option>\n        }\n      </select>\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-medium text-gray-700\">説明</label>\n      <textarea\n        [(ngModel)]=\"newBrand.description\"\n        class=\"w-full border p-2 rounded-lg mt-1\"\n        rows=\"3\"\n        placeholder=\"ブランドの詳細を入力\"\n      ></textarea>\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-medium text-gray-700\"\n        >ウェブサイトURL</label\n      >\n      <input\n        type=\"url\"\n        [(ngModel)]=\"newBrand.url\"\n        class=\"w-full border p-2 rounded-lg mt-1\"\n        placeholder=\"https://example.com\"\n      />\n    </div>\n  </div>\n</app-edit-modal-base>\n"
+        },
+        {
+            "name": "ButtonComponent",
+            "id": "component-ButtonComponent-d7bf0323e6da130e2609e2af0117b4a8d7cd874132206af50bf43dfc37044485fe50f2867ea76525730dd195b9b95a43802a12dadc6ad5cd7bf2faa07f19f0da",
+            "file": "src/stories/button.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "storybook-button",
+            "styleUrls": [
+                "./button.css"
+            ],
+            "styles": [],
+            "template": " <button  type=\"button\"\n  (click)=\"onClick.emit($event)\"\n  [ngClass]=\"classes\"\n  [ngStyle]=\"{ 'background-color': backgroundColor }\"\n>\n  {{ label }}\n</button>",
+            "templateUrl": [],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [
+                {
+                    "name": "backgroundColor",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "rawdescription": "\nWhat background color to use",
+                    "description": "<p>What background color to use</p>\n",
+                    "line": 25,
+                    "type": "string",
+                    "decorators": []
+                },
+                {
+                    "name": "label",
+                    "defaultValue": "'Button'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "jsdoctags": [
+                        {
+                            "pos": 760,
+                            "end": 773,
+                            "kind": 328,
+                            "id": 0,
+                            "flags": 16842752,
+                            "modifierFlagsCache": 0,
+                            "transformFlags": 0,
+                            "tagName": {
+                                "pos": 761,
+                                "end": 769,
+                                "kind": 80,
+                                "id": 0,
+                                "flags": 16842752,
+                                "transformFlags": 0,
+                                "escapedText": "required"
+                            },
+                            "comment": ""
+                        }
+                    ],
+                    "rawdescription": "\n\nButton contents\n\n",
+                    "description": "<p>Button contents</p>\n",
+                    "line": 37,
+                    "type": "string",
+                    "decorators": []
+                },
+                {
+                    "name": "primary",
+                    "defaultValue": "false",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "rawdescription": "\nIs this the principal call to action on the page?",
+                    "description": "<p>Is this the principal call to action on the page?</p>\n",
+                    "line": 21,
+                    "type": "boolean",
+                    "decorators": []
+                },
+                {
+                    "name": "size",
+                    "defaultValue": "'medium'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "rawdescription": "\nHow large should the button be?",
+                    "description": "<p>How large should the button be?</p>\n",
+                    "line": 29,
+                    "type": "\"small\" | \"medium\" | \"large\"",
+                    "decorators": []
+                }
+            ],
+            "outputsClass": [
+                {
+                    "name": "onClick",
+                    "defaultValue": "new EventEmitter<Event>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "rawdescription": "\nOptional click handler",
+                    "description": "<p>Optional click handler</p>\n",
+                    "line": 41,
+                    "type": "EventEmitter"
+                }
+            ],
+            "propertiesClass": [],
+            "methodsClass": [],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": true,
+            "imports": [
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { CommonModule } from '@angular/common';\nimport { Component, Input, Output, EventEmitter } from '@angular/core';\n\n@Component({\n  selector: 'storybook-button',\n  standalone: true,\n  imports: [CommonModule],\n  template: ` <button\n  type=\"button\"\n  (click)=\"onClick.emit($event)\"\n  [ngClass]=\"classes\"\n  [ngStyle]=\"{ 'background-color': backgroundColor }\"\n>\n  {{ label }}\n</button>`,\n  styleUrls: ['./button.css'],\n})\nexport class ButtonComponent {\n  /** Is this the principal call to action on the page? */\n  @Input()\n  primary = false;\n\n  /** What background color to use */\n  @Input()\n  backgroundColor?: string;\n\n  /** How large should the button be? */\n  @Input()\n  size: 'small' | 'medium' | 'large' = 'medium';\n\n  /**\n   * Button contents\n   *\n   * @required\n   */\n  @Input()\n  label = 'Button';\n\n  /** Optional click handler */\n  @Output()\n  onClick = new EventEmitter<Event>();\n\n  public get classes(): string[] {\n    const mode = this.primary ? 'storybook-button--primary' : 'storybook-button--secondary';\n\n    return ['storybook-button', `storybook-button--${this.size}`, mode];\n  }\n}\n",
+            "assetsDirs": [],
+            "styleUrlsData": [
+                {
+                    "data": ".storybook-button {\n  display: inline-block;\n  cursor: pointer;\n  border: 0;\n  border-radius: 3em;\n  font-weight: 700;\n  line-height: 1;\n  font-family: 'Nunito Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;\n}\n.storybook-button--primary {\n  background-color: #555ab9;\n  color: white;\n}\n.storybook-button--secondary {\n  box-shadow: rgba(0, 0, 0, 0.15) 0px 0px 0px 1px inset;\n  background-color: transparent;\n  color: #333;\n}\n.storybook-button--small {\n  padding: 10px 16px;\n  font-size: 12px;\n}\n.storybook-button--medium {\n  padding: 11px 20px;\n  font-size: 14px;\n}\n.storybook-button--large {\n  padding: 12px 24px;\n  font-size: 16px;\n}\n",
+                    "styleUrl": "./button.css"
+                }
+            ],
+            "stylesData": "",
+            "extends": [],
+            "accessors": {
+                "classes": {
+                    "name": "classes",
+                    "getSignature": {
+                        "name": "classes",
+                        "type": "[]",
+                        "returnType": "string[]",
+                        "line": 43
+                    }
+                }
+            }
+        },
+        {
+            "name": "CardBaseComponent",
+            "id": "component-CardBaseComponent-c13f9b665dbce1830b899856ae74503541b2665d046a9bd4f985c339d31fafbd33cb61435752c2d1d3178e583f9522c60c740e68119d0b57d93d6169527ea025",
+            "file": "src/app/components/card-base/card-base.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-card-base",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./card-base.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [
+                {
+                    "name": "category",
+                    "defaultValue": "''",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 12,
+                    "type": "string",
+                    "decorators": []
+                },
+                {
+                    "name": "description",
+                    "defaultValue": "''",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 13,
+                    "type": "string",
+                    "decorators": []
+                },
+                {
+                    "name": "title",
+                    "defaultValue": "''",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 11,
+                    "type": "string",
+                    "decorators": []
+                },
+                {
+                    "name": "url",
+                    "defaultValue": "''",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 14,
+                    "type": "string",
+                    "decorators": []
+                }
+            ],
+            "outputsClass": [],
+            "propertiesClass": [],
+            "methodsClass": [],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component, Input } from '@angular/core';\nimport { CommonModule } from '@angular/common';\n\n@Component({\n  selector: 'app-card-base',\n  imports: [CommonModule],\n  templateUrl: './card-base.component.html',\n  styleUrl: './card-base.component.css',\n})\nexport class CardBaseComponent {\n  @Input() title: string = '';\n  @Input() category: string = '';\n  @Input() description: string = '';\n  @Input() url: string = '';\n}\n",
+            "styleUrl": "./card-base.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "extends": [],
+            "templateData": "<div\n  class=\"border rounded-lg p-4 shadow-sm bg-white h-full transition-hover hover:shadow-md\"\n>\n  <h2 class=\"text-xl font-bold mb-3 border-b pb-2\">{{ title }}</h2>\n\n  <ng-content></ng-content>\n</div>\n"
+        },
+        {
+            "name": "CategoryTabsComponent",
+            "id": "component-CategoryTabsComponent-c22f0ff26b0cd6c531696b175cdc1534f4c1221c2ffe692a05aadd2cdfd046413858875fc5bc04729fa7bc00494b2737526c18acb6e8d3633a19285cbaa3c634",
+            "file": "src/app/components/category-tabs/category-tabs.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-category-tabs",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./category-tabs.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [
+                {
+                    "name": "selectedCategory",
+                    "defaultValue": "'すべて'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 12,
+                    "type": "string",
+                    "decorators": []
+                }
+            ],
+            "outputsClass": [
+                {
+                    "name": "categoryChange",
+                    "defaultValue": "new EventEmitter<string>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 15,
+                    "type": "EventEmitter"
+                }
+            ],
+            "propertiesClass": [
+                {
+                    "name": "categories",
+                    "defaultValue": "[\n    'すべて',\n    'ファッション',\n    'メイク',\n    'アクセサリー',\n    'カラコン',\n    'その他',\n  ]",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "[]",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 18
+                }
+            ],
+            "methodsClass": [
+                {
+                    "name": "selectCategory",
+                    "args": [
+                        {
+                            "name": "category",
+                            "type": "string",
+                            "deprecated": false,
+                            "deprecationMessage": ""
+                        }
+                    ],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 28,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "jsdoctags": [
+                        {
+                            "name": "category",
+                            "type": "string",
+                            "deprecated": false,
+                            "deprecationMessage": "",
+                            "tagName": {
+                                "text": "param"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component, Input, Output, EventEmitter } from '@angular/core';\nimport { CommonModule } from '@angular/common';\n\n@Component({\n  selector: 'app-category-tabs',\n  imports: [CommonModule],\n  templateUrl: './category-tabs.component.html',\n  styleUrl: './category-tabs.component.css',\n})\nexport class CategoryTabsComponent {\n  // --- 親から受け取るデータ ---\n  @Input() selectedCategory: string = 'すべて';\n\n  // --- 親へ送るイベント ---\n  @Output() categoryChange = new EventEmitter<string>();\n\n  // カテゴリーのリスト\n  categories = [\n    'すべて',\n    'ファッション',\n    'メイク',\n    'アクセサリー',\n    'カラコン',\n    'その他',\n  ];\n\n  // --- クリック時に実行される処理 ---\n  selectCategory(category: string) {\n    // 親コンポーネントに「このカテゴリーが選ばれたよ！」と伝える\n    this.categoryChange.emit(category);\n  }\n}\n",
+            "styleUrl": "./category-tabs.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "extends": [],
+            "templateData": "<div class=\"flex flex-wrap gap-2 pb-4\">\n  @for (category of categories; track category) {\n  <button\n    (click)=\"selectCategory(category)\"\n    [class.bg-daidai]=\"selectedCategory === category\"\n    [class.text-white]=\"selectedCategory === category\"\n    [class.border-daidai]=\"selectedCategory === category\"\n    [class.bg-white]=\"selectedCategory !== category\"\n    class=\"px-4 py-2 rounded-full border text-sm whitespace-nowrap transition-all\"\n  >\n    {{ category }}\n  </button>\n  }\n</div>\n"
+        },
+        {
+            "name": "EditModalBaseComponent",
+            "id": "component-EditModalBaseComponent-d4db675b4bf1175e48d62915eb4fcf5b29e7483c3b083a84a7582b4d78fc06f887b86379ed44fb538c72d64b391e0ce22600e1a17a47132ddae2c6a1eda65d6b",
+            "file": "src/app/components/edit-modal-base/edit-modal-base.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-edit-modal-base",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./edit-modal-base.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [
+                {
+                    "name": "isOpen",
+                    "defaultValue": "false",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 10,
+                    "type": "boolean",
+                    "decorators": []
+                },
+                {
+                    "name": "isSubmitDisabled",
+                    "defaultValue": "false",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 13,
+                    "type": "boolean",
+                    "decorators": []
+                },
+                {
+                    "name": "submitLabel",
+                    "defaultValue": "'保存'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 12,
+                    "type": "string",
+                    "decorators": []
+                },
+                {
+                    "name": "title",
+                    "defaultValue": "'編集'",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 11,
+                    "type": "string",
+                    "decorators": []
+                }
+            ],
+            "outputsClass": [
+                {
+                    "name": "close",
+                    "defaultValue": "new EventEmitter<void>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 14,
+                    "type": "EventEmitter"
+                },
+                {
+                    "name": "submit",
+                    "defaultValue": "new EventEmitter<void>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 15,
+                    "type": "EventEmitter"
+                }
+            ],
+            "propertiesClass": [],
+            "methodsClass": [
+                {
+                    "name": "onClose",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 17,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                },
+                {
+                    "name": "onSubmit",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 21,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                }
+            ],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component, Input, Output, EventEmitter } from '@angular/core';\n\n@Component({\n  selector: 'app-edit-modal-base',\n  imports: [],\n  templateUrl: './edit-modal-base.component.html',\n  styleUrl: './edit-modal-base.component.css',\n})\nexport class EditModalBaseComponent {\n  @Input() isOpen = false;\n  @Input() title = '編集';\n  @Input() submitLabel = '保存';\n  @Input() isSubmitDisabled = false; // バリデーションエラー時にボタンを無効化できるように\n  @Output() close = new EventEmitter<void>();\n  @Output() submit = new EventEmitter<void>();\n\n  onClose() {\n    this.close.emit();\n  }\n\n  onSubmit() {\n    this.submit.emit();\n  }\n}\n",
+            "styleUrl": "./edit-modal-base.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "extends": [],
+            "templateData": "@if (isOpen) {\n<div\n  (click)=\"onClose()\"\n  class=\"fixed inset-0 bg-black/50 flex items-center justify-center z-50 transition-opacity\"\n>\n  <div\n    (click)=\"$event.stopPropagation()\"\n    class=\"bg-white p-6 rounded-xl shadow-xl w-full max-w-md mx-4 transform transition-all\"\n  >\n    <h2 class=\"text-xl font-bold mb-4 text-gray-800\">{{ title }}</h2>\n\n    <div class=\"space-y-4\">\n      <ng-content></ng-content>\n    </div>\n\n    <div class=\"flex justify-end space-x-3 mt-6\">\n      <button\n        (click)=\"onClose()\"\n        class=\"px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition font-medium\"\n      >\n        キャンセル\n      </button>\n      <button\n        (click)=\"onSubmit()\"\n        [disabled]=\"isSubmitDisabled\"\n        [class.opacity-50]=\"isSubmitDisabled\"\n        class=\"px-4 py-2 bg-daidai text-white rounded-lg font-bold hover:bg-opacity-90 transition shadow-sm\"\n      >\n        {{ submitLabel }}\n      </button>\n    </div>\n  </div>\n</div>\n}\n"
+        },
+        {
+            "name": "FavoritesComponent",
+            "id": "component-FavoritesComponent-de5e338559c667dbe523a49f3f6583d4eef730d7e9e23afb6506167bc444a9339b881c69b37f5d77d3b4e98cb1600cd706b1034c1fac5f72d8987e27d7d90674",
+            "file": "src/app/pages/favorites/favorites.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-favorites",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./favorites.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [],
+            "outputsClass": [],
+            "propertiesClass": [
+                {
+                    "name": "auth",
+                    "defaultValue": "inject(Auth)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Auth",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 57,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "brandsCollection",
+                    "defaultValue": "collection(this.firestore, 'brands')",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 66,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "CATEGORIES",
+                    "defaultValue": "[\n    'すべて',\n    'ファッション',\n    'メイク',\n    'アクセサリー',\n    'カラコン',\n    'その他',\n  ]",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "[]",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 74,
+                    "modifierKind": [
+                        148
+                    ]
+                },
+                {
+                    "name": "existingBrandNames$",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Observable<string[]>",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 89
+                },
+                {
+                    "name": "favorites$",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Observable<any[]>",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 88,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "favoritesCollection",
+                    "defaultValue": "collection(this.firestore, 'favorites')",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 64,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "filteredFavorites$",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Observable<any[]>",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 92
+                },
+                {
+                    "name": "firestore",
+                    "defaultValue": "inject(Firestore)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Firestore",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 60,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "injector",
+                    "defaultValue": "inject(EnvironmentInjector)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 61,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "isModalOpen",
+                    "defaultValue": "false",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 73
+                },
+                {
+                    "name": "newItem",
+                    "defaultValue": "this.getEmptyItem() as FavoriteItem",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 85
+                },
+                {
+                    "name": "selectedCategorySubject",
+                    "defaultValue": "new BehaviorSubject<string>('すべて')",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 83,
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "user$",
+                    "defaultValue": "user(this.auth)",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "unknown",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 58
+                }
+            ],
+            "methodsClass": [
+                {
+                    "name": "getEmptyItem",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "FavoriteItem",
+                    "typeParameters": [],
+                    "line": 183,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "modifierKind": [
+                        123
+                    ]
+                },
+                {
+                    "name": "handleClose",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 199,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                },
+                {
+                    "name": "onCategoryChanged",
+                    "args": [
+                        {
+                            "name": "category",
+                            "type": "string",
+                            "deprecated": false,
+                            "deprecationMessage": ""
+                        }
+                    ],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 173,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "jsdoctags": [
+                        {
+                            "name": "category",
+                            "type": "string",
+                            "deprecated": false,
+                            "deprecationMessage": "",
+                            "tagName": {
+                                "text": "param"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "openAddModal",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 194,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                },
+                {
+                    "name": "saveItem",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "any",
+                    "typeParameters": [],
+                    "line": 203,
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "modifierKind": [
+                        134
+                    ]
+                }
+            ],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [
+                {
+                    "name": "AddButtonComponent",
+                    "type": "component"
+                },
+                {
+                    "name": "EditModalBaseComponent",
+                    "type": "component"
+                },
+                {
+                    "name": "CardBaseComponent",
+                    "type": "component"
+                },
+                {
+                    "name": "FormsModule",
+                    "type": "module"
+                },
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                },
+                {
+                    "name": "AsyncPipe",
+                    "type": "pipe"
+                },
+                {
+                    "name": "CategoryTabsComponent",
+                    "type": "component"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import {\n  Component,\n  EnvironmentInjector,\n  inject,\n  runInInjectionContext,\n} from '@angular/core';\nimport { AddButtonComponent } from '@/components/add-button/add-button.component';\nimport { EditModalBaseComponent } from '@/components/edit-modal-base/edit-modal-base.component';\nimport { CardBaseComponent } from '@/components/card-base/card-base.component';\nimport { FormsModule } from '@angular/forms';\nimport { CommonModule, AsyncPipe } from '@angular/common';\nimport {\n  BehaviorSubject,\n  Observable,\n  combineLatest,\n  map,\n  of,\n  switchMap,\n} from 'rxjs';\nimport {\n  addDoc,\n  collection,\n  collectionData,\n  Firestore,\n  orderBy,\n  query,\n  serverTimestamp,\n  where,\n} from '@angular/fire/firestore';\nimport { CategoryTabsComponent } from '@/components/category-tabs/category-tabs.component';\nimport { Auth, user } from '@angular/fire/auth';\n\ninterface FavoriteItem {\n  brandName: string;\n  itemName: string;\n  url: string;\n  price: number | null;\n  memo: string;\n  category?: string;\n}\n\n@Component({\n  selector: 'app-favorites',\n  imports: [\n    AddButtonComponent,\n    EditModalBaseComponent,\n    CardBaseComponent,\n    FormsModule,\n    CommonModule,\n    AsyncPipe,\n    CategoryTabsComponent,\n  ],\n  templateUrl: './favorites.component.html',\n  styleUrl: './favorites.component.css',\n})\nexport class FavoritesComponent {\n  private auth: Auth = inject(Auth);\n  user$ = user(this.auth); // 現在のログインユーザーを監視\n\n  private firestore: Firestore = inject(Firestore);\n  private injector = inject(EnvironmentInjector); // 警告解消のために必要\n\n  // お気に入り商品用のコレクション（favoritesに変更）\n  private favoritesCollection = collection(this.firestore, 'favorites');\n  // ブランド選択肢用\n  private brandsCollection = collection(this.firestore, 'brands');\n\n  // HTML側 [selectedCategory]=\"currentCategory\" で使う窓口\n  get currentCategory(): string {\n    return this.selectedCategorySubject.value;\n  }\n  //  最初は閉じているので false\n  isModalOpen = false;\n  readonly CATEGORIES = [\n    'すべて',\n    'ファッション',\n    'メイク',\n    'アクセサリー',\n    'カラコン',\n    'その他',\n  ];\n  // BehaviorSubject で選択中のカテゴリーを管理（これが「箱」）\n  private selectedCategorySubject = new BehaviorSubject<string>('すべて');\n\n  newItem = this.getEmptyItem() as FavoriteItem;\n\n  // --- データストリーム ---\n  private favorites$: Observable<any[]>;\n  existingBrandNames$: Observable<string[]>;\n\n  // これをHTMLの @for で使います\n  filteredFavorites$: Observable<any[]>;\n\n  constructor() {\n    // 1. ログインユーザーが切り替わったら、自動的にクエリを作り直す\n    this.favorites$ = this.user$.pipe(\n      switchMap((currentUser) => {\n        if (currentUser) {\n          // 非同期コールバック内でのFirebase API呼び出しをAngularのコンテキストで実行\n          return runInInjectionContext(this.injector, () => {\n            const q = query(\n              this.favoritesCollection,\n              where('uid', '==', currentUser.uid),\n              orderBy('createdAt', 'desc')\n            );\n            // idFieldを指定してドキュメントIDを取得可能にする\n            return collectionData(q, { idField: 'id' }) as Observable<any[]>;\n          });\n        } else {\n          // 未ログインなら空配列を返す\n          return of([]);\n        }\n      })\n    ) as Observable<any[]>;\n\n    // フィルタリングロジックの合体（Firestoreデータかタブが変わるたびに自動実行）\n    this.filteredFavorites$ = combineLatest([\n      this.favorites$,\n      this.selectedCategorySubject,\n    ]).pipe(\n      map(([items, category]) => {\n        if (category === 'すべて') return items;\n        return items.filter((item) => item.category === category);\n      })\n    );\n\n    // ブランド名の選択肢用（ログインユーザーのブランドのみ）\n    this.existingBrandNames$ = this.user$.pipe(\n      switchMap((currentUser) => {\n        if (currentUser) {\n          return runInInjectionContext(this.injector, () => {\n            const q = query(\n              this.brandsCollection,\n              where('uid', '==', currentUser.uid),\n              orderBy('name')\n            );\n            return collectionData(q).pipe(\n              map((brands) => brands.map((b: any) => b.name))\n            );\n          });\n        } else {\n          return of([]);\n        }\n      })\n    );\n\n    // === 最後にsubscribeでデバッグ ===\n    console.log('📝 About to subscribe to observables...');\n\n    this.user$.subscribe((user) => {\n      console.log('🔐 User subscription fired:', user?.uid);\n    });\n\n    this.favorites$.subscribe({\n      next: (items) => console.log('📦 favorites$ emitted:', items),\n      error: (err) => console.error('❌ favorites$ error:', err),\n    });\n\n    this.filteredFavorites$.subscribe({\n      next: (items) => console.log('✨ filteredFavorites$ emitted:', items),\n      error: (err) => console.error('❌ filteredFavorites$ error:', err),\n    });\n\n    this.existingBrandNames$.subscribe({\n      next: (brands) => console.log('🏷️ brandNames$ emitted:', brands),\n      error: (err) => console.error('❌ brandNames$ error:', err),\n    });\n\n    console.log('✅ All subscriptions set up');\n  }\n\n  // 子コンポーネント(タブ)からの通知を受け取る関数\n  onCategoryChanged(category: string) {\n    this.selectedCategorySubject.next(category);\n  }\n\n  // --- 以下、メソッド類 ---\n\n  get modalCategoryOptions() {\n    return this.CATEGORIES.filter((c) => c !== 'すべて');\n  }\n\n  private getEmptyItem(): FavoriteItem {\n    return {\n      brandName: '',\n      itemName: '',\n      url: '',\n      price: null,\n      memo: '',\n      category: 'ファッション', // 保存用初期値\n    };\n  }\n\n  openAddModal() {\n    this.newItem = this.getEmptyItem();\n    this.isModalOpen = true;\n  }\n\n  handleClose() {\n    this.isModalOpen = false;\n  }\n\n  async saveItem() {\n    const currentUser = await this.auth.currentUser; // 現在のユーザーを取得\n    if (!currentUser) return; // ログインしてなければ保存させない\n    if (!this.newItem.brandName.trim() || !this.newItem.itemName.trim()) {\n      alert('ブランド名と商品名は必須です');\n      return;\n    }\n\n    try {\n      await addDoc(this.favoritesCollection, {\n        brandName: this.newItem.brandName,\n        itemName: this.newItem.itemName,\n        url: this.newItem.url,\n        price: Number(this.newItem.price) || 0,\n        memo: this.newItem.memo,\n        category: this.newItem.category || 'その他',\n        createdAt: serverTimestamp(),\n        uid: currentUser.uid, // ユーザーIDを保存！\n      });\n      console.log('✅ Item saved successfully!');\n      this.isModalOpen = false;\n      this.newItem = this.getEmptyItem();\n    } catch (error) {\n      console.error('Error saving favorite item:', error);\n      alert('保存に失敗しました');\n    }\n  }\n}\n",
+            "styleUrl": "./favorites.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "constructorObj": {
+                "name": "constructor",
+                "description": "",
+                "deprecated": false,
+                "deprecationMessage": "",
+                "args": [],
+                "line": 92
+            },
+            "extends": [],
+            "accessors": {
+                "currentCategory": {
+                    "name": "currentCategory",
+                    "getSignature": {
+                        "name": "currentCategory",
+                        "type": "string",
+                        "returnType": "string",
+                        "line": 69
+                    }
+                },
+                "modalCategoryOptions": {
+                    "name": "modalCategoryOptions",
+                    "getSignature": {
+                        "name": "modalCategoryOptions",
+                        "type": "",
+                        "returnType": "",
+                        "line": 179
+                    }
+                }
+            },
+            "templateData": "<app-category-tabs\n  [selectedCategory]=\"currentCategory\"\n  (categoryChange)=\"onCategoryChanged($event)\"\n>\n</app-category-tabs>\n<!-- 追加ボタン -->\n<app-add-button\n  class=\"flex justify-end mb-4\"\n  label=\"お気に入りを追加\"\n  (btnClick)=\"openAddModal()\"\n>\n</app-add-button>\n<!-- お気に入り商品一覧をグリッド表示 -->\n<div class=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6\">\n  @for (item of (filteredFavorites$ | async); track item.id) {\n  <app-card-base [title]=\"item.itemName\">\n    <div class=\"space-y-2\">\n      <span\n        class=\"text-xs font-semibold px-2 py-1 bg-pink-50 rounded text-pink-600\"\n      >\n        {{ item.brandName }}\n      </span>\n      <span class=\"text-xs bg-gray-100 px-2 py-1 rounded\">{{\n        item.category\n      }}</span>\n\n      @if (item.price) {\n      <p class=\"text-sm font-bold text-gray-900\">¥{{ item.price | number }}</p>\n      }\n      <p class=\"text-sm text-gray-600 line-clamp-3\">\n        {{ item.memo }}\n      </p>\n      @if (item.url) {\n      <a\n        [href]=\"item.url\"\n        target=\"_blank\"\n        class=\"text-blue-500 text-xs hover:underline block pt-2\"\n      >\n        商品リンク →\n      </a>\n      }\n    </div>\n  </app-card-base>\n  } @empty {\n  <div class=\"col-span-full text-center py-10 text-gray-400\">\n    <p>該当するカテゴリーのお気に入り商品は登録されていません。</p>\n  </div>\n  }\n</div>\n<!-- お気に入り商品入力モーダル -->\n<app-edit-modal-base\n  [isOpen]=\"isModalOpen\"\n  title=\"商品を追加 ✨\"\n  (submit)=\"saveItem()\"\n  (close)=\"isModalOpen = false\"\n>\n  <div class=\"space-y-4 mt-4\">\n    <div>\n      <label class=\"block text-sm font-bold text-gray-500 ml-1\">ブランド</label>\n      <select\n        [(ngModel)]=\"newItem['brandName']\"\n        class=\"w-full border-gray-200 border p-3 rounded-xl mt-1 bg-white focus:ring-2 focus:ring-pink-100 outline-none appearance-none cursor-pointer transition-all\"\n      >\n        <option value=\"\" disabled selected>\n          ブランドを選択してください ✨\n        </option>\n\n        @for (name of existingBrandNames$ | async; track name) {\n        <option [value]=\"name\">{{ name }}</option>\n        }\n      </select>\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-medium text-gray-700\">カテゴリー</label>\n      <select\n        [(ngModel)]=\"newItem.category\"\n        name=\"brandCategory\"\n        class=\"w-full border p-2 rounded-lg mt-1 bg-white\"\n      >\n        @for (option of modalCategoryOptions; track option) {\n        <option [value]=\"option\">{{ option }}</option>\n        }\n      </select>\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-bold text-gray-500 ml-1\">商品名</label>\n      <input\n        type=\"text\"\n        [(ngModel)]=\"newItem.itemName\"\n        class=\"w-full border-gray-200 border p-3 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none\"\n        placeholder=\"例: ワイヤレスヘッドホン\"\n      />\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-bold text-gray-500 ml-1\">商品URL</label>\n      <input\n        type=\"url\"\n        [(ngModel)]=\"newItem.url\"\n        class=\"w-full border-gray-200 border p-3 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none\"\n        placeholder=\"https://...\"\n      />\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-bold text-gray-500 ml-1\">価格</label>\n      <div class=\"relative flex items-center\">\n        <span class=\"absolute left-4 text-gray-400\">¥</span>\n        <input\n          type=\"number\"\n          [(ngModel)]=\"newItem.price\"\n          class=\"w-full border-gray-200 border p-3 pl-8 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none\"\n          placeholder=\"0\"\n        />\n      </div>\n    </div>\n\n    <div>\n      <label class=\"block text-sm font-bold text-gray-500 ml-1\">メモ</label>\n      <textarea\n        [(ngModel)]=\"newItem.memo\"\n        class=\"w-full border-gray-200 border p-3 rounded-xl mt-1 focus:ring-2 focus:ring-pink-100 outline-none\"\n        rows=\"3\"\n        placeholder=\"サイズ感や欲しい理由など...\"\n      ></textarea>\n    </div>\n  </div>\n</app-edit-modal-base>\n"
+        },
+        {
+            "name": "HeaderComponent",
+            "id": "component-HeaderComponent-48b9abe37706bc42f20cfa97ed9f943678344ea7d254c0c82183c657750c2191b43486fe730c778627b2ea6aa0e2f33a7abcf3ce08b68ad18b062ad99ea97acb",
+            "file": "src/stories/header.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "storybook-header",
+            "styleUrls": [
+                "./header.css"
+            ],
+            "styles": [],
+            "template": "<header>  <div class=\"storybook-header\">\n    <div>\n      <svg width=\"32\" height=\"32\" viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\">\n        <g fill=\"none\" fillRule=\"evenodd\">\n          <path\n            d=\"M10 0h12a10 10 0 0110 10v12a10 10 0 01-10 10H10A10 10 0 010 22V10A10 10 0 0110 0z\"\n            fill=\"#FFF\"\n          />\n          <path\n            d=\"M5.3 10.6l10.4 6v11.1l-10.4-6v-11zm11.4-6.2l9.7 5.5-9.7 5.6V4.4z\"\n            fill=\"#555AB9\"\n          />\n          <path d=\"M27.2 10.6v11.2l-10.5 6V16.5l10.5-6zM15.7 4.4v11L6 10l9.7-5.5z\" fill=\"#91BAF8\" />\n        </g>\n      </svg>\n      <h1>Acme</h1>\n    </div>\n    <div>\n      <div *ngIf=\"user\">\n        <span class=\"welcome\">\n          Welcome, <b>{{ user.name }}</b\n          >!\n        </span>\n        <storybook-button\n          *ngIf=\"user\"\n          size=\"small\"\n          (onClick)=\"onLogout.emit($event)\"\n          label=\"Log out\"\n        ></storybook-button>\n      </div>\n      <div *ngIf=\"!user\">\n        <storybook-button\n          *ngIf=\"!user\"\n          size=\"small\"\n          class=\"margin-left\"\n          (onClick)=\"onLogin.emit($event)\"\n          label=\"Log in\"\n        ></storybook-button>\n        <storybook-button\n          *ngIf=\"!user\"\n          size=\"small\"\n          [primary]=\"true\"\n          class=\"margin-left\"\n          (onClick)=\"onCreateAccount.emit($event)\"\n          label=\"Sign up\"\n        ></storybook-button>\n      </div>\n    </div>\n  </div>\n</header>",
+            "templateUrl": [],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [
+                {
+                    "name": "user",
+                    "defaultValue": "null",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 66,
+                    "type": "User | null",
+                    "decorators": []
+                }
+            ],
+            "outputsClass": [
+                {
+                    "name": "onCreateAccount",
+                    "defaultValue": "new EventEmitter<Event>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 75,
+                    "type": "EventEmitter"
+                },
+                {
+                    "name": "onLogin",
+                    "defaultValue": "new EventEmitter<Event>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 69,
+                    "type": "EventEmitter"
+                },
+                {
+                    "name": "onLogout",
+                    "defaultValue": "new EventEmitter<Event>()",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "line": 72,
+                    "type": "EventEmitter"
+                }
+            ],
+            "propertiesClass": [],
+            "methodsClass": [],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": true,
+            "imports": [
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                },
+                {
+                    "name": "ButtonComponent",
+                    "type": "component"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component, Input, Output, EventEmitter } from '@angular/core';\nimport { CommonModule } from '@angular/common';\n\nimport { ButtonComponent } from './button.component';\nimport type { User } from './user';\n\n@Component({\n  selector: 'storybook-header',\n  standalone: true,\n  imports: [CommonModule, ButtonComponent],\n  template: `<header>\n  <div class=\"storybook-header\">\n    <div>\n      <svg width=\"32\" height=\"32\" viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\">\n        <g fill=\"none\" fillRule=\"evenodd\">\n          <path\n            d=\"M10 0h12a10 10 0 0110 10v12a10 10 0 01-10 10H10A10 10 0 010 22V10A10 10 0 0110 0z\"\n            fill=\"#FFF\"\n          />\n          <path\n            d=\"M5.3 10.6l10.4 6v11.1l-10.4-6v-11zm11.4-6.2l9.7 5.5-9.7 5.6V4.4z\"\n            fill=\"#555AB9\"\n          />\n          <path d=\"M27.2 10.6v11.2l-10.5 6V16.5l10.5-6zM15.7 4.4v11L6 10l9.7-5.5z\" fill=\"#91BAF8\" />\n        </g>\n      </svg>\n      <h1>Acme</h1>\n    </div>\n    <div>\n      <div *ngIf=\"user\">\n        <span class=\"welcome\">\n          Welcome, <b>{{ user.name }}</b\n          >!\n        </span>\n        <storybook-button\n          *ngIf=\"user\"\n          size=\"small\"\n          (onClick)=\"onLogout.emit($event)\"\n          label=\"Log out\"\n        ></storybook-button>\n      </div>\n      <div *ngIf=\"!user\">\n        <storybook-button\n          *ngIf=\"!user\"\n          size=\"small\"\n          class=\"margin-left\"\n          (onClick)=\"onLogin.emit($event)\"\n          label=\"Log in\"\n        ></storybook-button>\n        <storybook-button\n          *ngIf=\"!user\"\n          size=\"small\"\n          [primary]=\"true\"\n          class=\"margin-left\"\n          (onClick)=\"onCreateAccount.emit($event)\"\n          label=\"Sign up\"\n        ></storybook-button>\n      </div>\n    </div>\n  </div>\n</header>`,\n  styleUrls: ['./header.css'],\n})\nexport class HeaderComponent {\n  @Input()\n  user: User | null = null;\n\n  @Output()\n  onLogin = new EventEmitter<Event>();\n\n  @Output()\n  onLogout = new EventEmitter<Event>();\n\n  @Output()\n  onCreateAccount = new EventEmitter<Event>();\n}\n",
+            "assetsDirs": [],
+            "styleUrlsData": [
+                {
+                    "data": ".storybook-header {\n  display: flex;\n  justify-content: space-between;\n  align-items: center;\n  border-bottom: 1px solid rgba(0, 0, 0, 0.1);\n  padding: 15px 20px;\n  font-family: 'Nunito Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;\n}\n\n.storybook-header svg {\n  display: inline-block;\n  vertical-align: top;\n}\n\n.storybook-header h1 {\n  display: inline-block;\n  vertical-align: top;\n  margin: 6px 0 6px 10px;\n  font-weight: 700;\n  font-size: 20px;\n  line-height: 1;\n}\n\n.storybook-header button + button {\n  margin-left: 10px;\n}\n\n.storybook-header .welcome {\n  margin-right: 10px;\n  color: #333;\n  font-size: 14px;\n}\n",
+                    "styleUrl": "./header.css"
+                }
+            ],
+            "stylesData": "",
+            "extends": []
+        },
+        {
+            "name": "NewItemsComponent",
+            "id": "component-NewItemsComponent-0f510506da736097f0185e945a51a0ca94b11aec9ed1203efd0f1e5aba10291982d50a6024946a071257f4823764560f281a15bb3e10c89439a228007d99adf0",
+            "file": "src/app/pages/new-items/new-items.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "app-new-items",
+            "styleUrls": [],
+            "styles": [],
+            "templateUrl": [
+                "./new-items.component.html"
+            ],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [],
+            "outputsClass": [],
+            "propertiesClass": [],
+            "methodsClass": [],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": false,
+            "imports": [],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component } from '@angular/core';\n\n@Component({\n  selector: 'app-new-items',\n  imports: [],\n  templateUrl: './new-items.component.html',\n  styleUrl: './new-items.component.css'\n})\nexport class NewItemsComponent {\n\n}\n",
+            "styleUrl": "./new-items.component.css",
+            "assetsDirs": [],
+            "styleUrlsData": "",
+            "stylesData": "",
+            "extends": [],
+            "templateData": "<div\n  class=\"relative min-h-[70vh] w-full overflow-hidden flex items-center justify-center bg-gray-50/50 rounded-3xl\"\n>\n  <div\n    class=\"absolute inset-0 grid grid-cols-2 md:grid-cols-3 gap-4 p-6 opacity-40 pointer-events-none scale-105\"\n  >\n    @for (i of [1,2,3,4,5,6]; track i) {\n    <div\n      class=\"bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3\"\n    >\n      <div\n        class=\"w-full aspect-square bg-gray-200 rounded-xl animate-pulse\"\n      ></div>\n      <div class=\"h-4 bg-gray-200 rounded w-3/4 animate-pulse\"></div>\n      <div class=\"h-4 bg-gray-200 rounded w-1/2 animate-pulse\"></div>\n    </div>\n    }\n  </div>\n\n  <div\n    class=\"relative z-10 backdrop-blur-md bg-white/60 p-10 rounded-3xl border border-white shadow-xl text-center max-w-sm mx-4\"\n  >\n    <div class=\"text-6xl mb-6 animate-bounce\">🪄</div>\n\n    <h3 class=\"text-xl font-bold text-gray-800 mb-3\">とっておきをセレクト中</h3>\n\n    <p class=\"text-sm text-gray-500 leading-relaxed mb-6\">\n      あなたの「お気に入りブランド」から、<br />\n      最新の新作情報を一生懸命あつめています。<br />\n      公開まで、どうぞお楽しみに ✨\n    </p>\n\n    <div class=\"flex justify-center gap-2\">\n      <div class=\"h-1.5 w-8 bg-pink-300 rounded-full animate-pulse\"></div>\n      <div\n        class=\"h-1.5 w-8 bg-blue-300 rounded-full animate-pulse [animation-delay:0.2s]\"\n      ></div>\n      <div\n        class=\"h-1.5 w-8 bg-yellow-300 rounded-full animate-pulse [animation-delay:0.4s]\"\n      ></div>\n    </div>\n  </div>\n</div>\n"
+        },
+        {
+            "name": "PageComponent",
+            "id": "component-PageComponent-21dd6eb370b4983b5c21c84d40e6f54d266a9d9af9889e6e76b35c43058bd53b3e451bad089d5adf4bea46647ba10265a2fa8cb15630398e75636307d4817fc6",
+            "file": "src/stories/page.component.ts",
+            "encapsulation": [],
+            "entryComponents": [],
+            "inputs": [],
+            "outputs": [],
+            "providers": [],
+            "selector": "storybook-page",
+            "styleUrls": [
+                "./page.css"
+            ],
+            "styles": [],
+            "template": "<article>  <storybook-header\n    [user]=\"user\"\n    (onLogout)=\"doLogout()\"\n    (onLogin)=\"doLogin()\"\n    (onCreateAccount)=\"doCreateAccount()\"\n  ></storybook-header>\n  <section class=\"storybook-page\">\n    <h2>Pages in Storybook</h2>\n    <p>\n      We recommend building UIs with a\n      <a href=\"https://componentdriven.org\" target=\"_blank\" rel=\"noopener noreferrer\">\n        <strong>component-driven</strong>\n      </a>\n      process starting with atomic components and ending with pages.\n    </p>\n    <p>\n      Render pages with mock data. This makes it easy to build and review page states without\n      needing to navigate to them in your app. Here are some handy patterns for managing page data\n      in Storybook:\n    </p>\n    <ul>\n      <li>\n        Use a higher-level connected component. Storybook helps you compose such data from the\n        \"args\" of child component stories\n      </li>\n      <li>\n        Assemble data in the page component from your services. You can mock these services out\n        using Storybook.\n      </li>\n    </ul>\n    <p>\n      Get a guided tutorial on component-driven development at\n      <a href=\"https://storybook.js.org/tutorials/\" target=\"_blank\" rel=\"noopener noreferrer\">\n        Storybook tutorials\n      </a>\n      . Read more in the\n      <a href=\"https://storybook.js.org/docs\" target=\"_blank\" rel=\"noopener noreferrer\"> docs </a>\n      .\n    </p>\n    <div class=\"tip-wrapper\">\n      <span class=\"tip\">Tip</span> Adjust the width of the canvas with the\n      <svg width=\"10\" height=\"10\" viewBox=\"0 0 12 12\" xmlns=\"http://www.w3.org/2000/svg\">\n        <g fill=\"none\" fillRule=\"evenodd\">\n          <path\n            d=\"M1.5 5.2h4.8c.3 0 .5.2.5.4v5.1c-.1.2-.3.3-.4.3H1.4a.5.5 0 01-.5-.4V5.7c0-.3.2-.5.5-.5zm0-2.1h6.9c.3 0 .5.2.5.4v7a.5.5 0 01-1 0V4H1.5a.5.5 0 010-1zm0-2.1h9c.3 0 .5.2.5.4v9.1a.5.5 0 01-1 0V2H1.5a.5.5 0 010-1zm4.3 5.2H2V10h3.8V6.2z\"\n            id=\"a\"\n            fill=\"#999\"\n          />\n        </g>\n      </svg>\n      Viewports addon in the toolbar\n    </div>\n  </section>\n</article>",
+            "templateUrl": [],
+            "viewProviders": [],
+            "hostDirectives": [],
+            "inputsClass": [],
+            "outputsClass": [],
+            "propertiesClass": [
+                {
+                    "name": "user",
+                    "defaultValue": "null",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "User | null",
+                    "indexKey": "",
+                    "optional": false,
+                    "description": "",
+                    "line": 69
+                }
+            ],
+            "methodsClass": [
+                {
+                    "name": "doCreateAccount",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 79,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                },
+                {
+                    "name": "doLogin",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 75,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                },
+                {
+                    "name": "doLogout",
+                    "args": [],
+                    "optional": false,
+                    "returnType": "void",
+                    "typeParameters": [],
+                    "line": 71,
+                    "deprecated": false,
+                    "deprecationMessage": ""
+                }
+            ],
+            "deprecated": false,
+            "deprecationMessage": "",
+            "hostBindings": [],
+            "hostListeners": [],
+            "standalone": true,
+            "imports": [
+                {
+                    "name": "CommonModule",
+                    "type": "module"
+                },
+                {
+                    "name": "HeaderComponent",
+                    "type": "component"
+                }
+            ],
+            "description": "",
+            "rawdescription": "\n",
+            "type": "component",
+            "sourceCode": "import { Component } from '@angular/core';\nimport { CommonModule } from '@angular/common';\n\nimport { HeaderComponent } from './header.component';\nimport type { User } from './user';\n\n@Component({\n  selector: 'storybook-page',\n  standalone: true,\n  imports: [CommonModule, HeaderComponent],\n  template: `<article>\n  <storybook-header\n    [user]=\"user\"\n    (onLogout)=\"doLogout()\"\n    (onLogin)=\"doLogin()\"\n    (onCreateAccount)=\"doCreateAccount()\"\n  ></storybook-header>\n  <section class=\"storybook-page\">\n    <h2>Pages in Storybook</h2>\n    <p>\n      We recommend building UIs with a\n      <a href=\"https://componentdriven.org\" target=\"_blank\" rel=\"noopener noreferrer\">\n        <strong>component-driven</strong>\n      </a>\n      process starting with atomic components and ending with pages.\n    </p>\n    <p>\n      Render pages with mock data. This makes it easy to build and review page states without\n      needing to navigate to them in your app. Here are some handy patterns for managing page data\n      in Storybook:\n    </p>\n    <ul>\n      <li>\n        Use a higher-level connected component. Storybook helps you compose such data from the\n        \"args\" of child component stories\n      </li>\n      <li>\n        Assemble data in the page component from your services. You can mock these services out\n        using Storybook.\n      </li>\n    </ul>\n    <p>\n      Get a guided tutorial on component-driven development at\n      <a href=\"https://storybook.js.org/tutorials/\" target=\"_blank\" rel=\"noopener noreferrer\">\n        Storybook tutorials\n      </a>\n      . Read more in the\n      <a href=\"https://storybook.js.org/docs\" target=\"_blank\" rel=\"noopener noreferrer\"> docs </a>\n      .\n    </p>\n    <div class=\"tip-wrapper\">\n      <span class=\"tip\">Tip</span> Adjust the width of the canvas with the\n      <svg width=\"10\" height=\"10\" viewBox=\"0 0 12 12\" xmlns=\"http://www.w3.org/2000/svg\">\n        <g fill=\"none\" fillRule=\"evenodd\">\n          <path\n            d=\"M1.5 5.2h4.8c.3 0 .5.2.5.4v5.1c-.1.2-.3.3-.4.3H1.4a.5.5 0 01-.5-.4V5.7c0-.3.2-.5.5-.5zm0-2.1h6.9c.3 0 .5.2.5.4v7a.5.5 0 01-1 0V4H1.5a.5.5 0 010-1zm0-2.1h9c.3 0 .5.2.5.4v9.1a.5.5 0 01-1 0V2H1.5a.5.5 0 010-1zm4.3 5.2H2V10h3.8V6.2z\"\n            id=\"a\"\n            fill=\"#999\"\n          />\n        </g>\n      </svg>\n      Viewports addon in the toolbar\n    </div>\n  </section>\n</article>`,\n  styleUrls: ['./page.css'],\n})\nexport class PageComponent {\n  user: User | null = null;\n\n  doLogout() {\n    this.user = null;\n  }\n\n  doLogin() {\n    this.user = { name: 'Jane Doe' };\n  }\n\n  doCreateAccount() {\n    this.user = { name: 'Jane Doe' };\n  }\n}\n",
+            "assetsDirs": [],
+            "styleUrlsData": [
+                {
+                    "data": ".storybook-page {\n  margin: 0 auto;\n  padding: 48px 20px;\n  max-width: 600px;\n  color: #333;\n  font-size: 14px;\n  line-height: 24px;\n  font-family: 'Nunito Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;\n}\n\n.storybook-page h2 {\n  display: inline-block;\n  vertical-align: top;\n  margin: 0 0 4px;\n  font-weight: 700;\n  font-size: 32px;\n  line-height: 1;\n}\n\n.storybook-page p {\n  margin: 1em 0;\n}\n\n.storybook-page a {\n  color: inherit;\n}\n\n.storybook-page ul {\n  margin: 1em 0;\n  padding-left: 30px;\n}\n\n.storybook-page li {\n  margin-bottom: 8px;\n}\n\n.storybook-page .tip {\n  display: inline-block;\n  vertical-align: top;\n  margin-right: 10px;\n  border-radius: 1em;\n  background: #e7fdd8;\n  padding: 4px 12px;\n  color: #357a14;\n  font-weight: 700;\n  font-size: 11px;\n  line-height: 12px;\n}\n\n.storybook-page .tip-wrapper {\n  margin-top: 40px;\n  margin-bottom: 40px;\n  font-size: 13px;\n  line-height: 20px;\n}\n\n.storybook-page .tip-wrapper svg {\n  display: inline-block;\n  vertical-align: top;\n  margin-top: 3px;\n  margin-right: 4px;\n  width: 12px;\n  height: 12px;\n}\n\n.storybook-page .tip-wrapper svg path {\n  fill: #1ea7fd;\n}\n",
+                    "styleUrl": "./page.css"
+                }
+            ],
+            "stylesData": "",
+            "extends": []
+        }
+    ],
+    "modules": [],
+    "miscellaneous": {
+        "variables": [
+            {
+                "name": "appConfig",
+                "ctype": "miscellaneous",
+                "subtype": "variable",
+                "file": "src/app/app.config.ts",
+                "deprecated": false,
+                "deprecationMessage": "",
+                "type": "ApplicationConfig",
+                "defaultValue": "{\n  providers: [\n    provideZoneChangeDetection({ eventCoalescing: true }),\n    provideRouter(routes),\n    provideFirebaseApp(() =>\n      initializeApp({\n        projectId: 'fashion-trends-tracker',\n        appId: '1:265038459688:web:7625fb4e4d26917f43161d',\n        storageBucket: 'fashion-trends-tracker.firebasestorage.app',\n        apiKey: 'AIzaSyCraPW2IGX9xooQu5o3pw9MofhBWEa7ZXc',\n        authDomain: 'fashion-trends-tracker.firebaseapp.com',\n        messagingSenderId: '265038459688',\n        measurementId: 'G-20QGWQD66B',\n      })\n    ),\n    provideAuth(() => getAuth()),\n    provideFirestore(() => getFirestore()),\n  ],\n}"
+            },
+            {
+                "name": "routes",
+                "ctype": "miscellaneous",
+                "subtype": "variable",
+                "file": "src/app/app.routes.ts",
+                "deprecated": false,
+                "deprecationMessage": "",
+                "type": "Routes",
+                "defaultValue": "[\n  { path: '', redirectTo: '/brands', pathMatch: 'full' },\n  { path: 'brands', component: BrandsComponent },\n  { path: 'new-items', component: NewItemsComponent },\n  { path: 'favorites', component: FavoritesComponent },\n]"
+            }
+        ],
+        "functions": [],
+        "typealiases": [],
+        "enumerations": [],
+        "groupedVariables": {
+            "src/app/app.config.ts": [
+                {
+                    "name": "appConfig",
+                    "ctype": "miscellaneous",
+                    "subtype": "variable",
+                    "file": "src/app/app.config.ts",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "ApplicationConfig",
+                    "defaultValue": "{\n  providers: [\n    provideZoneChangeDetection({ eventCoalescing: true }),\n    provideRouter(routes),\n    provideFirebaseApp(() =>\n      initializeApp({\n        projectId: 'fashion-trends-tracker',\n        appId: '1:265038459688:web:7625fb4e4d26917f43161d',\n        storageBucket: 'fashion-trends-tracker.firebasestorage.app',\n        apiKey: 'AIzaSyCraPW2IGX9xooQu5o3pw9MofhBWEa7ZXc',\n        authDomain: 'fashion-trends-tracker.firebaseapp.com',\n        messagingSenderId: '265038459688',\n        measurementId: 'G-20QGWQD66B',\n      })\n    ),\n    provideAuth(() => getAuth()),\n    provideFirestore(() => getFirestore()),\n  ],\n}"
+                }
+            ],
+            "src/app/app.routes.ts": [
+                {
+                    "name": "routes",
+                    "ctype": "miscellaneous",
+                    "subtype": "variable",
+                    "file": "src/app/app.routes.ts",
+                    "deprecated": false,
+                    "deprecationMessage": "",
+                    "type": "Routes",
+                    "defaultValue": "[\n  { path: '', redirectTo: '/brands', pathMatch: 'full' },\n  { path: 'brands', component: BrandsComponent },\n  { path: 'new-items', component: NewItemsComponent },\n  { path: 'favorites', component: FavoritesComponent },\n]"
+                }
+            ]
+        },
+        "groupedFunctions": {},
+        "groupedEnumerations": {},
+        "groupedTypeAliases": {}
+    },
+    "routes": {
+        "name": "<root>",
+        "kind": "module",
+        "children": [
+            {
+                "name": "BrandsComponent",
+                "kind": "component",
+                "path": "brands",
+                "filename": "src/app/app.routes.ts"
+            },
+            {
+                "name": "NewItemsComponent",
+                "kind": "component",
+                "path": "new-items",
+                "filename": "src/app/app.routes.ts"
+            },
+            {
+                "name": "FavoritesComponent",
+                "kind": "component",
+                "path": "favorites",
+                "filename": "src/app/app.routes.ts"
+            }
+        ]
+    },
+    "coverage": {
+        "count": 5,
+        "status": "low",
+        "files": [
+            {
+                "filePath": "src/app/app.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "AppComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/7",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/app.config.ts",
+                "type": "variable",
+                "linktype": "miscellaneous",
+                "linksubtype": "variable",
+                "name": "appConfig",
+                "coveragePercent": 0,
+                "coverageCount": "0/1",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/app.routes.ts",
+                "type": "variable",
+                "linktype": "miscellaneous",
+                "linksubtype": "variable",
+                "name": "routes",
+                "coveragePercent": 0,
+                "coverageCount": "0/1",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/components/add-button/add-button.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "AddButtonComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/4",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/components/card-base/card-base.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "CardBaseComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/5",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/components/category-tabs/category-tabs.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "CategoryTabsComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/5",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/components/edit-modal-base/edit-modal-base.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "EditModalBaseComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/9",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/pages/brands/brands.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "BrandsComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/17",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/pages/favorites/favorites.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "FavoritesComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/20",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/pages/favorites/favorites.component.ts",
+                "type": "interface",
+                "linktype": "interface",
+                "name": "FavoriteItem",
+                "coveragePercent": 0,
+                "coverageCount": "0/7",
+                "status": "low"
+            },
+            {
+                "filePath": "src/app/pages/new-items/new-items.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "NewItemsComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/1",
+                "status": "low"
+            },
+            {
+                "filePath": "src/stories/button.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "ButtonComponent",
+                "coveragePercent": 83,
+                "coverageCount": "5/6",
+                "status": "very-good"
+            },
+            {
+                "filePath": "src/stories/header.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "HeaderComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/5",
+                "status": "low"
+            },
+            {
+                "filePath": "src/stories/page.component.ts",
+                "type": "component",
+                "linktype": "component",
+                "name": "PageComponent",
+                "coveragePercent": 0,
+                "coverageCount": "0/5",
+                "status": "low"
+            },
+            {
+                "filePath": "src/stories/user.ts",
+                "type": "interface",
+                "linktype": "interface",
+                "name": "User",
+                "coveragePercent": 0,
+                "coverageCount": "0/2",
+                "status": "low"
+            }
+        ]
+    }
+}
