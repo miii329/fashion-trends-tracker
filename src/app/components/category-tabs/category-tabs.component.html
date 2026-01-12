@@ -1,13 +1,14 @@
-<div class="flex space-x-2 overflow-x-auto pb-4 scrollbar-hide">
+<div class="flex flex-wrap gap-2 pb-4">
+  @for (category of categories; track category) {
   <button
-    *ngFor="let category of categories"
-    (click)="onCategoryClick(category)"
+    (click)="selectCategory(category)"
+    [class.bg-daidai]="selectedCategory === category"
+    [class.text-white]="selectedCategory === category"
+    [class.border-daidai]="selectedCategory === category"
+    [class.bg-white]="selectedCategory !== category"
     class="px-4 py-2 rounded-full border text-sm whitespace-nowrap transition-all"
-    [class.bg-daidai]="activeCategory === category"
-    [class.text-white]="activeCategory === category"
-    [class.border-daidai]="activeCategory === category"
-    [class.bg-white]="activeCategory !== category"
   >
     {{ category }}
   </button>
+  }
 </div>

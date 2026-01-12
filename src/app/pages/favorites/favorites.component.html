@@ -1,7 +1,18 @@
-<p>favorites works!</p>
+<app-category-tabs
+  [selectedCategory]="currentCategory"
+  (categoryChange)="onCategoryChanged($event)"
+>
+</app-category-tabs>
+<!-- 追加ボタン -->
+<app-add-button
+  class="flex justify-end mb-4"
+  label="お気に入りを追加"
+  (btnClick)="openAddModal()"
+>
+</app-add-button>
 <!-- お気に入り商品一覧をグリッド表示 -->
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-  @for (item of (favorites$ | async); track item.id) {
+  @for (item of (filteredFavorites$ | async); track item.id) {
   <app-card-base [title]="item.itemName">
     <div class="space-y-2">
       <span
@@ -9,6 +20,10 @@
       >
         {{ item.brandName }}
       </span>
+      <span class="text-xs bg-gray-100 px-2 py-1 rounded">{{
+        item.category
+      }}</span>
+
       @if (item.price) {
       <p class="text-sm font-bold text-gray-900">¥{{ item.price | number }}</p>
       }
@@ -28,13 +43,10 @@
   </app-card-base>
   } @empty {
   <div class="col-span-full text-center py-10 text-gray-400">
-    <p>お気に入りの商品はまだ登録されていません。</p>
+    <p>該当するカテゴリーのお気に入り商品は登録されていません。</p>
   </div>
   }
 </div>
-<!-- 追加ボタン -->
-<app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
-</app-add-button>
 <!-- お気に入り商品入力モーダル -->
 <app-edit-modal-base
   [isOpen]="isModalOpen"
@@ -55,6 +67,19 @@
 
         @for (name of existingBrandNames$ | async; track name) {
         <option [value]="name">{{ name }}</option>
+        }
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700">カテゴリー</label>
+      <select
+        [(ngModel)]="newItem.category"
+        name="brandCategory"
+        class="w-full border p-2 rounded-lg mt-1 bg-white"
+      >
+        @for (option of modalCategoryOptions; track option) {
+        <option [value]="option">{{ option }}</option>
         }
       </select>
     </div>

@@ -1,33 +1,42 @@
-<p>brands works!</p>
+<app-category-tabs
+  [selectedCategory]="currentCategory"
+  (categoryChange)="onCategoryChanged($event)"
+>
+</app-category-tabs>
+<!-- 追加ボタン -->
+<app-add-button
+  class="flex justify-end mb-4"
+  label="ブランドを追加"
+  (btnClick)="openAddModal()"
+>
+</app-add-button>
 <!-- ブランド一覧をグリッド表示 -->
-@for (brand of (brands$ | async); track brand.id) {
-<app-card-base [title]="brand.name">
-  <div class="space-y-2">
-    <span
-      class="text-xs font-semibold px-2 py-1 bg-gray-100 rounded text-gray-600"
-    >
-      {{ brand.category }}
-    </span>
-    <p class="text-sm text-gray-700 line-clamp-3">
-      {{ brand.description }}
-    </p>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+  @for (brand of (filteredBrands$ | async); track brand.id) {
+  <div class="border p-4 rounded-xl shadow-sm bg-white">
+    <div class="flex justify-between items-start mb-2">
+      <h2 class="font-bold text-lg">{{ brand.name }}</h2>
+      <span class="text-xs px-2 py-1 bg-gray-100 rounded">{{
+        brand.category
+      }}</span>
+    </div>
+    <p class="text-sm text-gray-600 mb-4">{{ brand.description }}</p>
     @if (brand.url) {
     <a
       [href]="brand.url"
       target="_blank"
-      class="text-blue-500 text-xs hover:underline block pt-2"
+      class="text-blue-500 text-xs hover:underline"
     >
       公式サイト →
     </a>
     }
   </div>
-</app-card-base>
-} @empty {
-<p>ブランドがまだ登録されていません。</p>
-}
-<!-- 追加ボタン -->
-<app-add-button label="ブランドを追加" (btnClick)="openAddModal()">
-</app-add-button>
+  } @empty {
+  <div class="col-span-2 py-20 text-center text-gray-400">
+    該当するブランドがありません。
+  </div>
+  }
+</div>
 <!-- ブランド情報入力モーダル -->
 <app-edit-modal-base
   [isOpen]="isModalOpen"

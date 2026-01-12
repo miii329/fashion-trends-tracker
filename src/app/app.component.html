@@ -1,45 +1,63 @@
-<!-- <div class="text-daidai text-2xl font-bold">橙色のテキスト 🎉</div>
-<div class="bg-azuki text-white p-4 rounded">小豆色の背景</div> -->
-<main>
-  <h1 class="text-[30px] font-bold text-daidai">LuvBrands</h1>
-  <p class="">お気に入りのブランドを管理して最新動向をチェック</p>
-  <div class="flex space-x-6">
-    <a
-      routerLink="/brands"
-      routerLinkActive="text-daidai"
-      class="hover:text-daidai transition"
-    >
-      ブランド一覧
-    </a>
-    <a
-      routerLink="/new-items"
-      routerLinkActive="text-daidai"
-      class="hover:text-daidai transition"
-    >
-      新作商品
-    </a>
-    <a
-      routerLink="/favorites"
-      routerLinkActive="text-daidai"
-      class="hover:text-daidai transition"
-    >
-      お気に入り商品
-    </a>
-  </div>
-  <section class="content">
-    <app-category-tabs
-      [categories]="[
-        'すべて',
-        'ファッション',
-        'メイク',
-        'アクセサリー',
-        'カラコン',
-        'その他'
-      ]"
-      [activeCategory]="selectedCategory"
-      (categoryChanged)="selectedCategory = $event"
-    >
-    </app-category-tabs>
-    <router-outlet />
-  </section>
-</main>
+<div class="py-8 px-6">
+  <header>
+    <div class="flex items-center justify-between">
+      <h1 class="text-[30px] font-bold text-daidai">TrendClip</h1>
+      <div class="flex items-center gap-3">
+        @if (user$ | async; as user) {
+        <div class="flex items-center gap-2">
+          <img
+            [src]="user.photoURL"
+            alt="icon"
+            class="w-8 h-8 rounded-full border border-pink-200"
+          />
+          <span class="text-sm font-medium text-gray-600 hidden md:block">{{
+            user.displayName
+          }}</span>
+        </div>
+        <button
+          (click)="logout()"
+          class="text-xs font-bold text-gray-400 hover:text-pink-500 transition-colors"
+        >
+          ログアウト
+        </button>
+        } @else {
+        <button
+          (click)="login()"
+          class="bg-pink-500 text-white px-4 py-2 rounded-full text-sm font-bold hover:bg-pink-600 transition-all shadow-md shadow-pink-100"
+        >
+          Googleでログイン
+        </button>
+        }
+      </div>
+    </div>
+    <p class="mb-8">お気に入りのブランドを管理して最新動向をチェック</p>
+  </header>
+  <main>
+    <div class="mb-6 flex gap-4 border-b border-gray-200">
+      <a
+        routerLink="/brands"
+        routerLinkActive="text-daidai border-b border-daidai"
+        class="hover:text-daidai transition px-3 py-2 md:px-6 md:py-3"
+      >
+        ブランド一覧
+      </a>
+      <a
+        routerLink="/new-items"
+        routerLinkActive="text-daidai border-b border-daidai"
+        class="hover:text-daidai transition px-3 py-2 md:px-6 md:py-3"
+      >
+        新作商品
+      </a>
+      <a
+        routerLink="/favorites"
+        routerLinkActive="text-daidai border-b border-daidai"
+        class="hover:text-daidai transition px-3 py-2 md:px-6 md:py-3"
+      >
+        お気に入り商品
+      </a>
+    </div>
+    <section class="content">
+      <router-outlet />
+    </section>
+  </main>
+</div>
