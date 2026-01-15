@@ -4,29 +4,30 @@
       <h1 class="text-[30px] font-bold text-daidai">TrendClip</h1>
       <div class="flex items-center gap-3">
         @if (user$ | async; as user) {
-        <div class="flex items-center gap-2">
-          <img
-            [src]="user.photoURL"
-            alt="icon"
-            class="w-8 h-8 rounded-full border border-pink-200"
-          />
-          <span class="text-sm font-medium text-gray-600 hidden md:block">{{
-            user.displayName
-          }}</span>
-        </div>
-        <button
-          (click)="logout()"
-          class="text-xs font-bold text-gray-400 hover:text-pink-500 transition-colors"
-        >
-          ログアウト
-        </button>
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="user_icon"
+              size="24px"
+              color=""
+              containerClass="rounded-full text-daidai"
+            />
+            <span class="text-sm font-medium text-gray-600 hidden md:block">{{
+              user.displayName
+            }}</span>
+          </div>
+          <button
+            (click)="logout()"
+            class="text-xs font-bold text-gray-400 hover:text-pink-500 transition-colors"
+          >
+            ログアウト
+          </button>
         } @else {
-        <button
-          (click)="login()"
-          class="bg-pink-500 text-white px-4 py-2 rounded-full text-sm font-bold hover:bg-pink-600 transition-all shadow-md shadow-pink-100"
-        >
-          Googleでログイン
-        </button>
+          <button
+            (click)="login()"
+            class="bg-daidai text-white px-4 py-2 rounded-full text-sm font-bold hover:bg-[#cc5555] transition-all shadow-md shadow-pink-100"
+          >
+            Googleでログイン
+          </button>
         }
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { ApplicationConfig, provideZoneChangeDetection } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
 
 import { routes } from './app.routes';
 import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
@@ -10,6 +11,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
+    provideHttpClient(), // HttpClientを提供
     provideFirebaseApp(() =>
       initializeApp({
         projectId: 'fashion-trends-tracker',
@@ -19,7 +21,7 @@ export const appConfig: ApplicationConfig = {
         authDomain: 'fashion-trends-tracker.firebaseapp.com',
         messagingSenderId: '265038459688',
         measurementId: 'G-20QGWQD66B',
-      })
+      }),
     ),
     provideAuth(() => getAuth()),
     provideFirestore(() => getFirestore()),

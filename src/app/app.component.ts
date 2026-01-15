@@ -11,6 +11,7 @@ import {
   User,
 } from '@angular/fire/auth';
 import { Observable } from 'rxjs';
+import { UserIconComponent } from './components/app-icon/app-icon.component';
 
 @Component({
   selector: 'app-root',
@@ -20,6 +21,7 @@ import { Observable } from 'rxjs';
     RouterLinkActive, // [routerLinkActive] を使うために必要
     AsyncPipe,
     CommonModule,
+    UserIconComponent, // ユーザーアイコンコンポーネント
   ],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
